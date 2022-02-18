@@ -16,6 +16,7 @@
 
 package im.vector.app.test.fakes
 
+import android.net.Uri
 import im.vector.app.test.testCoroutineDispatchers
 import io.mockk.mockk
 import org.matrix.android.sdk.api.session.Session
@@ -26,8 +27,11 @@ class FakeSession(
         val fakeSharedSecretStorageService: FakeSharedSecretStorageService = FakeSharedSecretStorageService()
 ) : Session by mockk(relaxed = true) {
 
+    override val myUserId: String = "a-user-id"
+
     override fun cryptoService() = fakeCryptoService
     override val sharedSecretStorageService = fakeSharedSecretStorageService
     override val coroutineDispatchers = testCoroutineDispatchers
     override suspend fun setDisplayName(userId: String, newDisplayName: String) = fakeProfileService.setDisplayName(userId, newDisplayName)
+    override suspend fun updateAvatar(userId: String, newAvatarUri: Uri, fileName: String) = fakeProfileService.updateAvatar(userId, newAvatarUri, fileName)
 }
