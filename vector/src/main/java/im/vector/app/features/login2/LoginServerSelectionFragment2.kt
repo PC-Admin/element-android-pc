@@ -43,17 +43,8 @@ class LoginServerSelectionFragment2 @Inject constructor() : AbstractLoginFragmen
     }
 
     private fun initViews() {
-        views.loginServerChoiceMatrixOrg.setOnClickListener { selectMatrixOrg() }
+        views.loginServerChoicePerthchatOrg.setOnClickListener { selectPerthchatOrg() }
         views.loginServerChoiceOther.setOnClickListener { selectOther() }
-
-        views.loginServerChoiceEmsLearnMore.setTextWithColoredPart(
-                fullTextRes = R.string.login_server_modular_learn_more_about_ems,
-                coloredTextRes = R.string.login_server_modular_learn_more,
-                underline = true
-        )
-        views.loginServerChoiceEmsLearnMore.setOnClickListener {
-            openUrlInChromeCustomTab(requireActivity(), null, EMS_LINK)
-        }
     }
 
     private fun updateUi(state: LoginViewState2) {
@@ -68,9 +59,9 @@ class LoginServerSelectionFragment2 @Inject constructor() : AbstractLoginFragmen
         }
     }
 
-    private fun selectMatrixOrg() {
-        views.loginServerChoiceMatrixOrg.isChecked = true
-        loginViewModel.handle(LoginAction2.ChooseDefaultHomeServer)
+    private fun selectPerthchatOrg() {
+        views.loginServerChoicePerthchatOrg.isChecked = true
+        loginViewModel.handle(LoginAction2.ChoosePerthchatHomeServer)
     }
 
     private fun selectOther() {
@@ -80,7 +71,7 @@ class LoginServerSelectionFragment2 @Inject constructor() : AbstractLoginFragmen
 
     override fun onResume() {
         super.onResume()
-        views.loginServerChoiceMatrixOrg.isChecked = false
+        views.loginServerChoicePerthchatOrg.isChecked = false
         views.loginServerChoiceOther.isChecked = false
     }
 

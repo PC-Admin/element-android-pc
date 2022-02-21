@@ -83,7 +83,6 @@ class HomeActivityViewModel @AssistedInject constructor(
         observeInitialSync()
         checkSessionPushIsOn()
         observeCrossSigningReset()
-        observeAnalytics()
     }
 
     private fun observeAnalytics() {
