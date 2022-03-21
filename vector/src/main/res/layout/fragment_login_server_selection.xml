@@ -45,7 +45,7 @@
 
             <!-- Use a CheckableConstraintLayout to keep the pressed state when retrieving login flow -->
             <im.vector.app.core.platform.CheckableConstraintLayout
-                android:id="@+id/loginServerChoiceMatrixOrg"
+                android:id="@+id/loginServerChoicePerthchatOrg"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
@@ -59,88 +59,34 @@
                 app:layout_constraintTop_toBottomOf="@id/loginServerText">
 
                 <ImageView
-                    android:id="@+id/loginServerChoiceMatrixOrgIcon"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:id="@+id/loginServerChoicePerthchatOrgIcon"
+                    android:layout_width="120dp"
+                    android:layout_height="25dp"
                     android:importantForAccessibility="no"
-                    android:src="@drawable/ic_logo_matrix_org"
-                    app:layout_constraintBottom_toTopOf="@id/loginServerChoiceMatrixOrgText"
+                    android:src="@drawable/ic_logo_perthchat_org"
+                    app:layout_constraintBottom_toTopOf="@id/loginServerChoicePerthchatOrgText"
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toTopOf="parent"
                     app:layout_constraintVertical_chainStyle="packed"
-                    app:tint="?vctr_content_primary"
-                    tools:ignore="MissingPrefix" />
+                    app:srcCompat="@drawable/ic_logo_perthchat_org"
+                    tools:ignore="MissingPrefix"
+                    tools:srcCompat="@drawable/ic_logo_perthchat_org" />
 
                 <TextView
-                    android:id="@+id/loginServerChoiceMatrixOrgText"
+                    android:id="@+id/loginServerChoicePerthchatOrgText"
                     style="@style/Widget.Vector.TextView.Caption"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="5dp"
                     android:gravity="start"
-                    android:text="@string/login_server_matrix_org_text"
+                    android:text="@string/login_server_perthchat_org_text"
                     android:textColor="?vctr_content_secondary"
                     app:layout_constraintBottom_toBottomOf="parent"
                     app:layout_constraintEnd_toEndOf="parent"
                     app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toBottomOf="@id/loginServerChoiceMatrixOrgIcon" />
+                    app:layout_constraintTop_toBottomOf="@id/loginServerChoicePerthchatOrgIcon" />
 
             </im.vector.app.core.platform.CheckableConstraintLayout>
-
-            <androidx.constraintlayout.widget.ConstraintLayout
-                android:id="@+id/loginServerChoiceEms"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/layout_vertical_margin"
-                android:background="@drawable/bg_login_server_selector"
-                android:contentDescription="@string/login_a11y_choose_modular"
-                android:minHeight="80dp"
-                android:paddingStart="@dimen/layout_horizontal_margin"
-                android:paddingEnd="0dp"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/loginServerChoiceMatrixOrg">
-
-                <ImageView
-                    android:id="@+id/loginServerChoiceEmsIcon"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:importantForAccessibility="no"
-                    android:src="@drawable/ic_logo_element_matrix_services"
-                    app:layout_constraintBottom_toTopOf="@id/loginServerChoiceEmsText"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toTopOf="parent"
-                    app:layout_constraintVertical_chainStyle="packed"
-                    app:tint="?vctr_content_primary"
-                    tools:ignore="MissingPrefix" />
-
-                <TextView
-                    android:id="@+id/loginServerChoiceEmsText"
-                    style="@style/Widget.Vector.TextView.Caption"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="7dp"
-                    android:gravity="start"
-                    android:text="@string/login_server_modular_text"
-                    android:textColor="?vctr_content_secondary"
-                    app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintEnd_toStartOf="@id/loginServerChoiceEmsLearnMore"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toBottomOf="@id/loginServerChoiceEmsIcon" />
-
-                <TextView
-                    android:id="@+id/loginServerChoiceEmsLearnMore"
-                    style="@style/Widget.Vector.TextView.Caption"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:padding="16dp"
-                    android:text="@string/login_server_modular_learn_more"
-                    android:textColor="?colorPrimary"
-                    app:layout_constraintBottom_toBottomOf="@id/loginServerChoiceEmsText"
-                    app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintTop_toTopOf="@id/loginServerChoiceEmsText" />
-
-            </androidx.constraintlayout.widget.ConstraintLayout>
 
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/loginServerChoiceOther"
@@ -154,7 +100,7 @@
                 android:paddingEnd="@dimen/layout_horizontal_margin"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/loginServerChoiceEms">
+                app:layout_constraintTop_toBottomOf="@+id/loginServerChoicePerthchatOrg">
 
                 <TextView
                     android:id="@+id/loginServerChoiceOtherTitle"

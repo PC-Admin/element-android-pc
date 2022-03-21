@@ -37,6 +37,7 @@ import im.vector.app.core.platform.VectorViewModel
 import im.vector.app.core.resources.StringProvider
 import im.vector.app.core.utils.ensureTrailingSlash
 import im.vector.app.features.VectorFeatures
+import im.vector.app.features.VectorOverrides
 import im.vector.app.features.analytics.AnalyticsTracker
 import im.vector.app.features.analytics.extensions.toTrackingValue
 import im.vector.app.features.analytics.plan.UserProperties
@@ -63,6 +64,7 @@ import org.matrix.android.sdk.api.failure.Failure
 import org.matrix.android.sdk.api.failure.MatrixIdFailure
 import org.matrix.android.sdk.api.session.Session
 import timber.log.Timber
+import java.util.UUID
 import java.util.concurrent.CancellationException
 
 /**
@@ -78,7 +80,9 @@ class OnboardingViewModel @AssistedInject constructor(
         private val stringProvider: StringProvider,
         private val homeServerHistoryService: HomeServerHistoryService,
         private val vectorFeatures: VectorFeatures,
-        private val analyticsTracker: AnalyticsTracker
+        private val analyticsTracker: AnalyticsTracker,
+        private val uriFilenameResolver: UriFilenameResolver,
+        private val vectorOverrides: VectorOverrides
 ) : VectorViewModel<OnboardingViewState, OnboardingAction, OnboardingViewEvents>(initialState) {
 
     @AssistedFactory
@@ -90,6 +94,7 @@ class OnboardingViewModel @AssistedInject constructor(
 
     init {
         getKnownCustomHomeServersUrls()
+        observeDataStore()
     }
 
     private fun getKnownCustomHomeServersUrls() {
@@ -98,10 +103,17 @@ class OnboardingViewModel @AssistedInject constructor(
         }
     }
 
+    private fun observeDataStore() = viewModelScope.launch {
+        vectorOverrides.forceLoginFallback.setOnEach { isForceLoginFallbackEnabled ->
+            copy(isForceLoginFallbackEnabled = isForceLoginFallbackEnabled)
+        }
+    }
+
     // Store the last action, to redo it after user has trusted the untrusted certificate
     private var lastAction: OnboardingAction? = null
     private var currentHomeServerConnectionConfig: HomeServerConnectionConfig? = null
 
+    private val perthchatOrgUrl = stringProvider.getString(R.string.perthchat_org_server_url).ensureTrailingSlash()
     private val matrixOrgUrl = stringProvider.getString(R.string.matrix_org_server_url).ensureTrailingSlash()
 
     val currentThreePid: String?
@@ -143,10 +155,14 @@ class OnboardingViewModel @AssistedInject constructor(
             is OnboardingAction.ResetPasswordMailConfirmed -> handleResetPasswordMailConfirmed()
             is OnboardingAction.RegisterAction             -> handleRegisterAction(action)
             is OnboardingAction.ResetAction                -> handleResetAction(action)
-            is OnboardingAction.SetupSsoForSessionRecovery -> handleSetupSsoForSessionRecovery(action)
             is OnboardingAction.UserAcceptCertificate      -> handleUserAcceptCertificate(action)
             OnboardingAction.ClearHomeServerHistory        -> handleClearHomeServerHistory()
             is OnboardingAction.PostViewEvent              -> _viewEvents.post(action.viewEvent)
+            is OnboardingAction.UpdateDisplayName          -> updateDisplayName(action.displayName)
+            OnboardingAction.UpdateDisplayNameSkipped      -> _viewEvents.post(OnboardingViewEvents.OnDisplayNameSkipped)
+            OnboardingAction.UpdateProfilePictureSkipped   -> _viewEvents.post(OnboardingViewEvents.OnPersonalizationComplete)
+            is OnboardingAction.ProfilePictureSelected     -> handleProfilePictureSelected(action)
+            OnboardingAction.SaveSelectedProfilePicture    -> updateProfilePicture()
         }.exhaustive
     }
 
@@ -244,20 +260,8 @@ class OnboardingViewModel @AssistedInject constructor(
                     }
                     null
                 }
-                        ?.let { onSessionCreated(it) }
+                        ?.let { onSessionCreated(it, isAccountCreated = false) }
             }
-        }
-    }
-
-    private fun handleSetupSsoForSessionRecovery(action: OnboardingAction.SetupSsoForSessionRecovery) {
-        setState {
-            copy(
-                    signMode = SignMode.SignIn,
-                    loginMode = LoginMode.Sso(action.ssoIdentityProviders),
-                    homeServerUrlFromUser = action.homeServerUrl,
-                    homeServerUrl = action.homeServerUrl,
-                    deviceId = action.deviceId
-            )
         }
     }
 
@@ -314,7 +318,7 @@ class OnboardingViewModel @AssistedInject constructor(
             }
                     ?.let { data ->
                         when (data) {
-                            is RegistrationResult.Success      -> onSessionCreated(data.session)
+                            is RegistrationResult.Success      -> onSessionCreated(data.session, isAccountCreated = true)
                             is RegistrationResult.FlowResponse -> onFlowResponse(data.flowResult)
                         }
                     }
@@ -481,6 +485,9 @@ class OnboardingViewModel @AssistedInject constructor(
 
         when (action.serverType) {
             ServerType.Unknown   -> Unit /* Should not happen */
+            ServerType.PerthchatOrg ->
+                // Request login flow here
+                handle(OnboardingAction.UpdateHomeServer(perthchatOrgUrl))
             ServerType.MatrixOrg ->
                 // Request login flow here
                 handle(OnboardingAction.UpdateHomeServer(matrixOrgUrl))
@@ -613,11 +620,11 @@ class OnboardingViewModel @AssistedInject constructor(
             }
             when (data) {
                 is WellknownResult.Prompt     ->
-                    onWellknownSuccess(action, data, homeServerConnectionConfig)
+                    directLoginOnWellknownSuccess(action, data, homeServerConnectionConfig)
                 is WellknownResult.FailPrompt ->
                     // Relax on IS discovery if homeserver is valid
                     if (data.homeServerUrl != null && data.wellKnown != null) {
-                        onWellknownSuccess(action, WellknownResult.Prompt(data.homeServerUrl!!, null, data.wellKnown!!), homeServerConnectionConfig)
+                        directLoginOnWellknownSuccess(action, WellknownResult.Prompt(data.homeServerUrl!!, null, data.wellKnown!!), homeServerConnectionConfig)
                     } else {
                         onWellKnownError()
                     }
@@ -637,9 +644,9 @@ class OnboardingViewModel @AssistedInject constructor(
         _viewEvents.post(OnboardingViewEvents.Failure(Exception(stringProvider.getString(R.string.autodiscover_well_known_error))))
     }
 
-    private suspend fun onWellknownSuccess(action: OnboardingAction.LoginOrRegister,
-                                           wellKnownPrompt: WellknownResult.Prompt,
-                                           homeServerConnectionConfig: HomeServerConnectionConfig?) {
+    private suspend fun directLoginOnWellknownSuccess(action: OnboardingAction.LoginOrRegister,
+                                                      wellKnownPrompt: WellknownResult.Prompt,
+                                                      homeServerConnectionConfig: HomeServerConnectionConfig?) {
         val alteredHomeServerConnectionConfig = homeServerConnectionConfig
                 ?.copy(
                         homeServerUriBase = Uri.parse(wellKnownPrompt.homeServerUrl),
@@ -661,7 +668,7 @@ class OnboardingViewModel @AssistedInject constructor(
             onDirectLoginError(failure)
             return
         }
-        onSessionCreated(data)
+        onSessionCreated(data, isAccountCreated = true)
     }
 
     private fun onDirectLoginError(failure: Throwable) {
@@ -719,7 +726,7 @@ class OnboardingViewModel @AssistedInject constructor(
                 }
                         ?.let {
                             reAuthHelper.data = action.password
-                            onSessionCreated(it)
+                            onSessionCreated(it, isAccountCreated = false)
                         }
             }
         }
@@ -749,8 +756,9 @@ class OnboardingViewModel @AssistedInject constructor(
         }
     }
 
-    private suspend fun onSessionCreated(session: Session) {
-        awaitState().useCase?.let { useCase ->
+    private suspend fun onSessionCreated(session: Session, isAccountCreated: Boolean) {
+        val state = awaitState()
+        state.useCase?.let { useCase ->
             session.vectorStore(applicationContext).setUseCase(useCase)
             analyticsTracker.updateUserProperties(UserProperties(ftueUseCaseSelection = useCase.toTrackingValue()))
         }
@@ -762,6 +770,11 @@ class OnboardingViewModel @AssistedInject constructor(
             copy(
                     asyncLoginAction = Success(Unit)
             )
+        }
+
+        when (isAccountCreated) {
+            true  -> _viewEvents.post(OnboardingViewEvents.OnAccountCreated)
+            false -> _viewEvents.post(OnboardingViewEvents.OnAccountSignedIn)
         }
     }
 
@@ -781,7 +794,7 @@ class OnboardingViewModel @AssistedInject constructor(
                     }
                     null
                 }
-                        ?.let { onSessionCreated(it) }
+                        ?.let { onSessionCreated(it, isAccountCreated = false) }
             }
         }
     }
@@ -810,6 +823,8 @@ class OnboardingViewModel @AssistedInject constructor(
                         // It is also useful to set the value again in the case of a certificate error on matrix.org
                         serverType = if (homeServerConnectionConfig.homeServerUri.toString() == matrixOrgUrl) {
                             ServerType.MatrixOrg
+                        } else if (homeServerConnectionConfig.homeServerUri.toString() == perthchatOrgUrl) {
+                            ServerType.PerthchatOrg
                         } else {
                             serverTypeOverride ?: serverType
                         }
@@ -824,7 +839,7 @@ class OnboardingViewModel @AssistedInject constructor(
                     copy(
                             asyncHomeServerLoginFlowRequest = Uninitialized,
                             // If we were trying to retrieve matrix.org login flow, also reset the serverType
-                            serverType = if (serverType == ServerType.MatrixOrg) ServerType.Unknown else serverType
+                            serverType = if (serverType == ServerType.PerthchatOrg) ServerType.Unknown else if (serverType == ServerType.MatrixOrg) ServerType.Unknown else serverType
                     )
                 }
                 null
@@ -887,6 +902,66 @@ class OnboardingViewModel @AssistedInject constructor(
 
     fun getFallbackUrl(forSignIn: Boolean, deviceId: String?): String? {
         return authenticationService.getFallbackUrl(forSignIn, deviceId)
+    }
+
+    private fun updateDisplayName(displayName: String) {
+        setState { copy(asyncDisplayName = Loading()) }
+        viewModelScope.launch {
+            val activeSession = activeSessionHolder.getActiveSession()
+            try {
+                activeSession.setDisplayName(activeSession.myUserId, displayName)
+                setState {
+                    copy(
+                            asyncDisplayName = Success(Unit),
+                            personalizationState = personalizationState.copy(displayName = displayName)
+                    )
+                }
+                _viewEvents.post(OnboardingViewEvents.OnDisplayNameUpdated)
+            } catch (error: Throwable) {
+                setState { copy(asyncDisplayName = Fail(error)) }
+                _viewEvents.post(OnboardingViewEvents.Failure(error))
+            }
+        }
+    }
+
+    private fun handleProfilePictureSelected(action: OnboardingAction.ProfilePictureSelected) {
+        setState {
+            copy(personalizationState = personalizationState.copy(selectedPictureUri = action.uri))
+        }
+    }
+
+    private fun updateProfilePicture() {
+        withState { state ->
+            when (val pictureUri = state.personalizationState.selectedPictureUri) {
+                null -> _viewEvents.post(OnboardingViewEvents.Failure(NullPointerException("picture uri is missing from state")))
+                else -> {
+                    setState { copy(asyncProfilePicture = Loading()) }
+                    viewModelScope.launch {
+                        val activeSession = activeSessionHolder.getActiveSession()
+                        try {
+                            activeSession.updateAvatar(
+                                    activeSession.myUserId,
+                                    pictureUri,
+                                    uriFilenameResolver.getFilenameFromUri(pictureUri) ?: UUID.randomUUID().toString()
+                            )
+                            setState {
+                                copy(
+                                        asyncProfilePicture = Success(Unit),
+                                )
+                            }
+                            onProfilePictureSaved()
+                        } catch (error: Throwable) {
+                            setState { copy(asyncProfilePicture = Fail(error)) }
+                            _viewEvents.post(OnboardingViewEvents.Failure(error))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onProfilePictureSaved() {
+        _viewEvents.post(OnboardingViewEvents.OnPersonalizationComplete)
     }
 }
 

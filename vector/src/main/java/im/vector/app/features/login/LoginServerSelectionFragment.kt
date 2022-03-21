@@ -43,26 +43,24 @@ class LoginServerSelectionFragment @Inject constructor() : AbstractLoginFragment
     }
 
     private fun initViews() {
-        views.loginServerChoiceEmsLearnMore.debouncedClicks { learnMore() }
-        views.loginServerChoiceMatrixOrg.debouncedClicks { selectMatrixOrg() }
-        views.loginServerChoiceEms.debouncedClicks { selectEMS() }
+        views.loginServerChoicePerthchatOrg.debouncedClicks { selectPerthchatOrg() }
         views.loginServerChoiceOther.debouncedClicks { selectOther() }
         views.loginServerIKnowMyIdSubmit.debouncedClicks { loginWithMatrixId() }
     }
 
     private fun updateSelectedChoice(state: LoginViewState) {
-        views.loginServerChoiceMatrixOrg.isChecked = state.serverType == ServerType.MatrixOrg
+        views.loginServerChoicePerthchatOrg.isChecked = state.serverType == ServerType.PerthchatOrg
     }
 
     private fun initTextViews() {
-        views.loginServerChoiceEmsLearnMore.text = span {
-            text = getString(R.string.login_server_modular_learn_more)
-            textDecorationLine = "underline"
-        }
     }
 
     private fun learnMore() {
         openUrlInChromeCustomTab(requireActivity(), null, EMS_LINK)
+    }
+
+    private fun selectPerthchatOrg() {
+        loginViewModel.handle(LoginAction.UpdateServerType(ServerType.PerthchatOrg))
     }
 
     private fun selectMatrixOrg() {
