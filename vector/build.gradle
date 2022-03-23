@@ -255,6 +255,7 @@ android {
 
     productFlavors {
         gplay {
+            applicationId "im.perthchat.app"
             apply plugin: 'com.google.gms.google-services'
             afterEvaluate {
                 tasks.matching { it.name.contains("GoogleServices") && !it.name.contains("Gplay") }*.enabled = false
@@ -271,6 +272,7 @@ android {
         }
 
         fdroid {
+            applicationId "im.perthchat.app"
             dimension "store"
 
             versionName "${versionMajor}.${versionMinor}.${versionPatch}${getFdroidVersionSuffix()}"
