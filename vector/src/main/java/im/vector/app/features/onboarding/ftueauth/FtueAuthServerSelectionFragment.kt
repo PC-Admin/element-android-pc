@@ -48,26 +48,24 @@ class FtueAuthServerSelectionFragment @Inject constructor() : AbstractFtueAuthFr
     }
 
     private fun initViews() {
-        views.loginServerChoiceEmsLearnMore.setOnClickListener { learnMore() }
-        views.loginServerChoiceMatrixOrg.setOnClickListener { selectMatrixOrg() }
-        views.loginServerChoiceEms.setOnClickListener { selectEMS() }
+        views.loginServerChoicePerthchatOrg.setOnClickListener { selectPerthchatOrg() }
         views.loginServerChoiceOther.setOnClickListener { selectOther() }
         views.loginServerIKnowMyIdSubmit.setOnClickListener { loginWithMatrixId() }
     }
 
     private fun updateSelectedChoice(state: OnboardingViewState) {
-        views.loginServerChoiceMatrixOrg.isChecked = state.serverType == ServerType.MatrixOrg
+        views.loginServerChoicePerthchatOrg.isChecked = state.serverType == ServerType.PerthchatOrg
     }
 
     private fun initTextViews() {
-        views.loginServerChoiceEmsLearnMore.text = span {
-            text = getString(R.string.login_server_modular_learn_more)
-            textDecorationLine = "underline"
-        }
     }
 
     private fun learnMore() {
         openUrlInChromeCustomTab(requireActivity(), null, EMS_LINK)
+    }
+
+    private fun selectPerthchatOrg() {
+        viewModel.handle(OnboardingAction.UpdateServerType(ServerType.PerthchatOrg))
     }
 
     private fun selectMatrixOrg() {
