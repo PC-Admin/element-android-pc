@@ -28,28 +28,31 @@ import dagger.hilt.EntryPoints
 import im.vector.app.core.di.MavericksAssistedViewModelFactory
 import im.vector.app.core.di.SingletonEntryPoint
 import im.vector.app.core.di.hiltMavericksViewModelFactory
-import im.vector.app.core.extensions.exhaustive
 import im.vector.app.core.platform.VectorViewModel
+import kotlinx.coroutines.launch
+import org.matrix.android.sdk.api.extensions.tryOrNull
 import org.matrix.android.sdk.api.session.Session
 import org.matrix.android.sdk.api.session.crypto.crosssigning.MXCrossSigningInfo
+import org.matrix.android.sdk.api.session.crypto.model.CryptoDeviceInfo
 import org.matrix.android.sdk.api.session.crypto.verification.VerificationMethod
+import org.matrix.android.sdk.api.session.getUserOrDefault
 import org.matrix.android.sdk.api.util.MatrixItem
 import org.matrix.android.sdk.api.util.toMatrixItem
 import org.matrix.android.sdk.flow.flow
-import org.matrix.android.sdk.internal.crypto.model.CryptoDeviceInfo
 
 data class DeviceListViewState(
         val userId: String,
         val allowDeviceAction: Boolean,
         val userItem: MatrixItem? = null,
-        val isMine: Boolean = false,
         val memberCrossSigningKey: MXCrossSigningInfo? = null,
         val cryptoDevices: Async<List<CryptoDeviceInfo>> = Loading(),
         val selectedDevice: CryptoDeviceInfo? = null
 ) : MavericksState
 
-class DeviceListBottomSheetViewModel @AssistedInject constructor(@Assisted private val initialState: DeviceListViewState,
-                                                                 private val session: Session) :
+class DeviceListBottomSheetViewModel @AssistedInject constructor(
+        @Assisted private val initialState: DeviceListViewState,
+        private val session: Session
+) :
         VectorViewModel<DeviceListViewState, DeviceListAction, DeviceListBottomSheetViewEvents>(initialState) {
 
     @AssistedFactory
@@ -59,23 +62,19 @@ class DeviceListBottomSheetViewModel @AssistedInject constructor(@Assisted priva
 
     companion object : MavericksViewModelFactory<DeviceListBottomSheetViewModel, DeviceListViewState> by hiltMavericksViewModelFactory() {
 
-        override fun initialState(viewModelContext: ViewModelContext): DeviceListViewState? {
+        override fun initialState(viewModelContext: ViewModelContext): DeviceListViewState {
             val args = viewModelContext.args<DeviceListBottomSheet.Args>()
             val userId = args.userId
             val session = EntryPoints.get(viewModelContext.app(), SingletonEntryPoint::class.java).activeSessionHolder().getActiveSession()
-            return session.getUser(userId)?.toMatrixItem()?.let {
-                DeviceListViewState(
-                        userId = userId,
-                        allowDeviceAction = args.allowDeviceAction,
-                        userItem = it,
-                        isMine = userId == session.myUserId
-                )
-            } ?: return super.initialState(viewModelContext)
+            return DeviceListViewState(
+                    userId = userId,
+                    allowDeviceAction = args.allowDeviceAction,
+                    userItem = session.getUserOrDefault(userId).toMatrixItem(),
+            )
         }
     }
 
     init {
-
         session.flow().liveUserCryptoDevices(initialState.userId)
                 .execute {
                     copy(cryptoDevices = it).also {
@@ -87,14 +86,24 @@ class DeviceListBottomSheetViewModel @AssistedInject constructor(@Assisted priva
                 .execute {
                     copy(memberCrossSigningKey = it.invoke()?.getOrNull())
                 }
+
+        updateMatrixItem()
+    }
+
+    private fun updateMatrixItem() {
+        viewModelScope.launch {
+            tryOrNull { session.userService().resolveUser(initialState.userId) }
+                    ?.toMatrixItem()
+                    ?.let { setState { copy(userItem = it) } }
+        }
     }
 
     override fun handle(action: DeviceListAction) {
         when (action) {
-            is DeviceListAction.SelectDevice   -> selectDevice(action)
+            is DeviceListAction.SelectDevice -> selectDevice(action)
             is DeviceListAction.DeselectDevice -> deselectDevice()
             is DeviceListAction.ManuallyVerify -> manuallyVerify(action)
-        }.exhaustive
+        }
     }
 
     private fun refreshSelectedId() = withState { state ->

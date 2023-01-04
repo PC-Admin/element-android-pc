@@ -26,6 +26,7 @@ import im.vector.app.core.extensions.addFragmentToBackstack
 import im.vector.app.core.extensions.replaceFragment
 import im.vector.app.core.platform.VectorBaseActivity
 import im.vector.app.databinding.ActivityThreadsBinding
+import im.vector.app.features.MainActivity
 import im.vector.app.features.analytics.extensions.toAnalyticsInteraction
 import im.vector.app.features.analytics.plan.Interaction
 import im.vector.app.features.home.AvatarRenderer
@@ -34,13 +35,13 @@ import im.vector.app.features.home.room.detail.arguments.TimelineArgs
 import im.vector.app.features.home.room.threads.arguments.ThreadListArgs
 import im.vector.app.features.home.room.threads.arguments.ThreadTimelineArgs
 import im.vector.app.features.home.room.threads.list.views.ThreadListFragment
+import im.vector.lib.core.utils.compat.getParcelableCompat
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
 
-    @Inject
-    lateinit var avatarRenderer: AvatarRenderer
+    @Inject lateinit var avatarRenderer: AvatarRenderer
 
 //    private val roomThreadDetailFragment: RoomThreadDetailFragment?
 //        get() {
@@ -59,13 +60,13 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
     private fun initFragment() {
         if (isFirstCreation()) {
             when (val fragment = fragmentToNavigate()) {
-                is DisplayFragment.ThreadList     -> {
+                is DisplayFragment.ThreadList -> {
                     initThreadListFragment(fragment.threadListArgs)
                 }
                 is DisplayFragment.ThreadTimeLine -> {
                     initThreadTimelineFragment(fragment.threadTimelineArgs)
                 }
-                is DisplayFragment.ErrorFragment  -> {
+                is DisplayFragment.ErrorFragment -> {
                     finish()
                 }
             }
@@ -76,7 +77,8 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
         replaceFragment(
                 views.threadsActivityFragmentContainer,
                 ThreadListFragment::class.java,
-                threadListArgs)
+                threadListArgs
+        )
     }
 
     private fun initThreadTimelineFragment(threadTimelineArgs: ThreadTimelineArgs) =
@@ -87,7 +89,8 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
                             roomId = threadTimelineArgs.roomId,
                             eventId = getEventIdToNavigate(),
                             threadTimelineArgs = threadTimelineArgs
-                    ))
+                    )
+            )
 
     /**
      * This function is used to navigate to the selected thread timeline.
@@ -100,7 +103,8 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
                     R.anim.animation_slide_in_right,
                     R.anim.animation_slide_out_left,
                     R.anim.animation_slide_in_left,
-                    R.anim.animation_slide_out_right)
+                    R.anim.animation_slide_out_right
+            )
         }
         addFragmentToBackstack(
                 container = views.threadsActivityFragmentContainer,
@@ -114,7 +118,7 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
     }
 
     /**
-     * Determine in witch fragment we should navigate
+     * Determine in witch fragment we should navigate.
      */
     private fun fragmentToNavigate(): DisplayFragment {
         getThreadTimelineArgs()?.let {
@@ -126,8 +130,8 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
         return DisplayFragment.ErrorFragment
     }
 
-    private fun getThreadTimelineArgs(): ThreadTimelineArgs? = intent?.extras?.getParcelable(THREAD_TIMELINE_ARGS)
-    private fun getThreadListArgs(): ThreadListArgs? = intent?.extras?.getParcelable(THREAD_LIST_ARGS)
+    private fun getThreadTimelineArgs(): ThreadTimelineArgs? = intent?.extras?.getParcelableCompat(THREAD_TIMELINE_ARGS)
+    private fun getThreadListArgs(): ThreadListArgs? = intent?.extras?.getParcelableCompat(THREAD_LIST_ARGS)
     private fun getEventIdToNavigate(): String? = intent?.extras?.getString(THREAD_EVENT_ID_TO_NAVIGATE)
 
     companion object {
@@ -140,12 +144,19 @@ class ThreadsActivity : VectorBaseActivity<ActivityThreadsBinding>() {
                 context: Context,
                 threadTimelineArgs: ThreadTimelineArgs?,
                 threadListArgs: ThreadListArgs?,
-                eventIdToNavigate: String? = null
+                eventIdToNavigate: String? = null,
+                firstStartMainActivity: Boolean = false
         ): Intent {
-            return Intent(context, ThreadsActivity::class.java).apply {
+            val intent = Intent(context, ThreadsActivity::class.java).apply {
                 putExtra(THREAD_TIMELINE_ARGS, threadTimelineArgs)
                 putExtra(THREAD_EVENT_ID_TO_NAVIGATE, eventIdToNavigate)
                 putExtra(THREAD_LIST_ARGS, threadListArgs)
+            }
+
+            return if (firstStartMainActivity) {
+                MainActivity.getIntentWithNextIntent(context, intent)
+            } else {
+                intent
             }
         }
     }

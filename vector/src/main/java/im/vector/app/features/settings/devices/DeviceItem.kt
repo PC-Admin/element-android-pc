@@ -31,14 +31,14 @@ import im.vector.app.core.resources.ColorProvider
 import im.vector.app.core.ui.views.ShieldImageView
 import im.vector.app.core.utils.DimensionConverter
 import me.gujun.android.span.span
-import org.matrix.android.sdk.internal.crypto.crosssigning.DeviceTrustLevel
-import org.matrix.android.sdk.internal.crypto.model.rest.DeviceInfo
+import org.matrix.android.sdk.api.session.crypto.crosssigning.DeviceTrustLevel
+import org.matrix.android.sdk.api.session.crypto.model.DeviceInfo
 
 /**
  * A list item for Device.
  */
-@EpoxyModelClass(layout = R.layout.item_device)
-abstract class DeviceItem : VectorEpoxyModel<DeviceItem.Holder>() {
+@EpoxyModelClass
+abstract class DeviceItem : VectorEpoxyModel<DeviceItem.Holder>(R.layout.item_device) {
 
     @EpoxyAttribute
     lateinit var deviceInfo: DeviceInfo
@@ -85,9 +85,9 @@ abstract class DeviceItem : VectorEpoxyModel<DeviceItem.Holder>() {
                     trusted
             )
 
-            holder.trustIcon.render(shield)
+            holder.trustIcon.renderDeviceShield(shield)
         } else {
-            holder.trustIcon.render(null)
+            holder.trustIcon.renderDeviceShield(null)
         }
 
         val detailedModeLabels = listOf(

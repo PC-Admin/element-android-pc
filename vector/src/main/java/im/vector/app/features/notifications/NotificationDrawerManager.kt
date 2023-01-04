@@ -20,13 +20,14 @@ import android.os.Handler
 import android.os.HandlerThread
 import androidx.annotation.WorkerThread
 import im.vector.app.ActiveSessionDataSource
-import im.vector.app.BuildConfig
 import im.vector.app.R
+import im.vector.app.core.resources.BuildMeta
 import im.vector.app.core.utils.FirstThrottler
 import im.vector.app.features.displayname.getBestName
 import im.vector.app.features.settings.VectorPreferences
 import org.matrix.android.sdk.api.session.Session
 import org.matrix.android.sdk.api.session.content.ContentUrlResolver
+import org.matrix.android.sdk.api.session.getUserOrDefault
 import org.matrix.android.sdk.api.util.toMatrixItem
 import timber.log.Timber
 import javax.inject.Inject
@@ -39,13 +40,14 @@ import javax.inject.Singleton
  */
 @Singleton
 class NotificationDrawerManager @Inject constructor(
-        private val context: Context,
+        context: Context,
         private val notificationDisplayer: NotificationDisplayer,
         private val vectorPreferences: VectorPreferences,
         private val activeSessionDataSource: ActiveSessionDataSource,
         private val notifiableEventProcessor: NotifiableEventProcessor,
         private val notificationRenderer: NotificationRenderer,
-        private val notificationEventPersistence: NotificationEventPersistence
+        private val notificationEventPersistence: NotificationEventPersistence,
+        private val buildMeta: BuildMeta,
 ) {
 
     private val handlerThread: HandlerThread = HandlerThread("NotificationDrawerManager", Thread.MIN_PRIORITY)
@@ -56,11 +58,12 @@ class NotificationDrawerManager @Inject constructor(
         get() = activeSessionDataSource.currentValue?.orNull()
 
     /**
-     * Lazily initializes the NotificationState as we rely on having a current session in order to fetch the persisted queue of events
+     * Lazily initializes the NotificationState as we rely on having a current session in order to fetch the persisted queue of events.
      */
     private val notificationState by lazy { createInitialNotificationState() }
     private val avatarSize = context.resources.getDimensionPixelSize(R.dimen.profile_avatar_size)
     private var currentRoomId: String? = null
+    private var currentThreadId: String? = null
     private val firstThrottler = FirstThrottler(200)
 
     private var useCompleteNotificationFormat = vectorPreferences.useCompleteNotificationFormat()
@@ -71,7 +74,7 @@ class NotificationDrawerManager @Inject constructor(
     }
 
     private fun createInitialNotificationState(): NotificationState {
-        val queuedEvents = notificationEventPersistence.loadEvents(currentSession, factory = { rawEvents ->
+        val queuedEvents = notificationEventPersistence.loadEvents(factory = { rawEvents ->
             NotificationEventQueue(rawEvents.toMutableList(), seenEventIds = CircularCache.create(cacheSize = 25))
         })
         val renderedEvents = queuedEvents.rawEvents().map { ProcessedEvent(ProcessedEvent.Type.KEEP, it) }.toMutableList()
@@ -91,7 +94,7 @@ class NotificationDrawerManager @Inject constructor(
         }
         // If we support multi session, event list should be per userId
         // Currently only manage single session
-        if (BuildConfig.LOW_PRIVACY_LOG_ENABLE) {
+        if (buildMeta.lowPrivacyLoggingEnabled) {
             Timber.d("onNotifiableEventReceived(): $notifiableEvent")
         } else {
             Timber.d("onNotifiableEventReceived(): is push: ${notifiableEvent.canBeReplaced}")
@@ -101,7 +104,7 @@ class NotificationDrawerManager @Inject constructor(
     }
 
     /**
-     * Clear all known events and refresh the notification drawer
+     * Clear all known events and refresh the notification drawer.
      */
     fun clearAllEvents() {
         updateEvents { it.clear() }
@@ -117,6 +120,22 @@ class NotificationDrawerManager @Inject constructor(
             currentRoomId = roomId
             if (hasChanged && roomId != null) {
                 it.clearMessagesForRoom(roomId)
+            }
+        }
+    }
+
+    /**
+     * Should be called when the application is currently opened and showing timeline for the given threadId.
+     * Used to ignore events related to that thread (no need to display notification) and clean any existing notification on this room.
+     */
+    fun setCurrentThread(threadId: String?) {
+        updateEvents {
+            val hasChanged = threadId != currentThreadId
+            currentThreadId = threadId
+            currentRoomId?.let { roomId ->
+                if (hasChanged && threadId != null) {
+                    it.clearMessagesForThread(roomId, threadId)
+                }
             }
         }
     }
@@ -154,14 +173,15 @@ class NotificationDrawerManager @Inject constructor(
                         Timber.w(throwable, "refreshNotificationDrawerBg failure")
                     }
                 },
-                canHandle.waitMillis())
+                canHandle.waitMillis()
+        )
     }
 
     @WorkerThread
     private fun refreshNotificationDrawerBg() {
         Timber.v("refreshNotificationDrawerBg()")
         val eventsToRender = notificationState.updateQueuedEvents(this) { queuedEvents, renderedEvents ->
-            notifiableEventProcessor.process(queuedEvents.rawEvents(), currentRoomId, renderedEvents).also {
+            notifiableEventProcessor.process(queuedEvents.rawEvents(), currentRoomId, currentThreadId, renderedEvents).also {
                 queuedEvents.clearAndAdd(it.onlyKeptEvents())
             }
         }
@@ -172,22 +192,22 @@ class NotificationDrawerManager @Inject constructor(
             notificationState.clearAndAddRenderedEvents(eventsToRender)
             val session = currentSession ?: return
             renderEvents(session, eventsToRender)
-            persistEvents(session)
+            persistEvents()
         }
     }
 
-    private fun persistEvents(session: Session) {
+    private fun persistEvents() {
         notificationState.queuedEvents { queuedEvents ->
-            notificationEventPersistence.persistEvents(queuedEvents, session)
+            notificationEventPersistence.persistEvents(queuedEvents)
         }
     }
 
     private fun renderEvents(session: Session, eventsToRender: List<ProcessedEvent<NotifiableEvent>>) {
-        val user = session.getUser(session.myUserId)
+        val user = session.getUserOrDefault(session.myUserId)
         // myUserDisplayName cannot be empty else NotificationCompat.MessagingStyle() will crash
-        val myUserDisplayName = user?.toMatrixItem()?.getBestName() ?: session.myUserId
+        val myUserDisplayName = user.toMatrixItem().getBestName()
         val myUserAvatarUrl = session.contentUrlResolver().resolveThumbnail(
-                contentUrl = user?.avatarUrl,
+                contentUrl = user.avatarUrl,
                 width = avatarSize,
                 height = avatarSize,
                 method = ContentUrlResolver.ThumbnailMethod.SCALE
@@ -195,8 +215,8 @@ class NotificationDrawerManager @Inject constructor(
         notificationRenderer.render(session.myUserId, myUserDisplayName, myUserAvatarUrl, useCompleteNotificationFormat, eventsToRender)
     }
 
-    fun shouldIgnoreMessageEventInRoom(roomId: String?): Boolean {
-        return currentRoomId != null && roomId == currentRoomId
+    fun shouldIgnoreMessageEventInRoom(resolvedEvent: NotifiableMessageEvent): Boolean {
+        return resolvedEvent.shouldIgnoreMessageEventInRoom(currentRoomId, currentThreadId)
     }
 
     companion object {

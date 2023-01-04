@@ -6,8 +6,8 @@
 
     <ImageView
         android:id="@+id/messageThreadSummaryImageView"
-        android:layout_width="16dp"
-        android:layout_height="16dp"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
         android:layout_marginTop="2dp"
         android:contentDescription="@string/room_threads_filter"
         android:src="@drawable/ic_thread_summary"
@@ -21,7 +21,6 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="4dp"
-        android:minEms="1"
         android:textColor="?vctr_content_secondary"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toEndOf="@id/messageThreadSummaryImageView"

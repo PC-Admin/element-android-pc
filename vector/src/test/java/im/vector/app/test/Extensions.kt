@@ -21,12 +21,14 @@ import im.vector.app.core.platform.VectorViewEvents
 import im.vector.app.core.platform.VectorViewModel
 import im.vector.app.core.platform.VectorViewModelAction
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 fun String.trimIndentOneLine() = trimIndent().replace("\n", "")
 
-fun <S : MavericksState, VA : VectorViewModelAction, VE : VectorViewEvents> VectorViewModel<S, VA, VE>.test(coroutineScope: CoroutineScope): ViewModelTest<S, VE> {
-    val state = stateFlow.test(coroutineScope)
-    val viewEvents = viewEvents.stream().test(coroutineScope)
+fun <S : MavericksState, VA : VectorViewModelAction, VE : VectorViewEvents> VectorViewModel<S, VA, VE>.test(): ViewModelTest<S, VE> {
+    val testResultCollectingScope = CoroutineScope(Dispatchers.Unconfined)
+    val state = stateFlow.test(testResultCollectingScope)
+    val viewEvents = viewEvents.stream().test(testResultCollectingScope)
     return ViewModelTest(state, viewEvents)
 }
 
@@ -60,7 +62,7 @@ class ViewModelTest<S, VE>(
     }
 
     /**
-     * Asserts the expected states are in the same order as the actual state emissions
+     * Asserts the expected states are in the same order as the actual state emissions.
      * Each expected lambda is given the previous expected state, starting with the initial
      */
     fun assertStatesChanges(initial: S, expected: List<S.() -> S>): ViewModelTest<S, VE> {
@@ -81,6 +83,16 @@ class ViewModelTest<S, VE>(
 
     fun assertState(expected: S): ViewModelTest<S, VE> {
         states.assertValues(expected)
+        return this
+    }
+
+    fun assertLatestState(expected: S): ViewModelTest<S, VE> {
+        states.assertLatestValue(expected)
+        return this
+    }
+
+    fun assertLatestState(predicate: (S) -> Boolean): ViewModelTest<S, VE> {
+        states.assertLatestValue(predicate)
         return this
     }
 

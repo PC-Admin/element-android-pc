@@ -41,6 +41,7 @@ private val IGNORED_OPTIONS: Options? = null
 @Singleton
 class DefaultVectorAnalytics @Inject constructor(
         postHogFactory: PostHogFactory,
+        private val sentryAnalytics: SentryAnalytics,
         analyticsConfig: AnalyticsConfig,
         private val analyticsStore: AnalyticsStore,
         private val lateInitUserPropertiesFactory: LateInitUserPropertiesFactory,
@@ -49,7 +50,7 @@ class DefaultVectorAnalytics @Inject constructor(
 
     private val posthog: PostHog? = when {
         analyticsConfig.isEnabled -> postHogFactory.createPosthog()
-        else                      -> {
+        else -> {
             Timber.tag(analyticsTag.value).w("Analytics is disabled")
             null
         }
@@ -94,6 +95,9 @@ class DefaultVectorAnalytics @Inject constructor(
     override suspend fun onSignOut() {
         // reset the analyticsId
         setAnalyticsId("")
+
+        // Close Sentry SDK.
+        sentryAnalytics.stopSentry()
     }
 
     private fun observeAnalyticsId() {
@@ -123,8 +127,18 @@ class DefaultVectorAnalytics @Inject constructor(
                     Timber.tag(analyticsTag.value).d("User consent updated to $consent")
                     userConsent = consent
                     optOutPostHog()
+                    initOrStopSentry()
                 }
                 .launchIn(globalScope)
+    }
+
+    private fun initOrStopSentry() {
+        userConsent?.let {
+            when (it) {
+                true -> sentryAnalytics.initSentry()
+                false -> sentryAnalytics.stopSentry()
+            }
+        }
     }
 
     private fun optOutPostHog() {
@@ -158,12 +172,18 @@ class DefaultVectorAnalytics @Inject constructor(
     }
 
     /**
-     * We avoid sending nulls as part of the UserProperties as this will reset the values across all devices
-     * The UserProperties event has nullable properties to allow for clients to opt in
+     * We avoid sending nulls as part of the UserProperties as this will reset the values across all devices.
+     * The UserProperties event has nullable properties to allow for clients to opt in.
      */
     private fun Map<String, Any?>.toPostHogUserProperties(): Properties {
         return Properties().apply {
             putAll(this@toPostHogUserProperties.filter { it.value != null })
         }
+    }
+
+    override fun trackError(throwable: Throwable) {
+        sentryAnalytics
+                .takeIf { userConsent == true }
+                ?.trackError(throwable)
     }
 }

@@ -110,10 +110,12 @@ internal abstract class CryptoModule {
         @Provides
         @CryptoDatabase
         @SessionScope
-        fun providesRealmConfiguration(@SessionFilesDirectory directory: File,
-                                       @UserMd5 userMd5: String,
-                                       realmKeysUtils: RealmKeysUtils,
-                                       realmCryptoStoreMigration: RealmCryptoStoreMigration): RealmConfiguration {
+        fun providesRealmConfiguration(
+                @SessionFilesDirectory directory: File,
+                @UserMd5 userMd5: String,
+                realmKeysUtils: RealmKeysUtils,
+                realmCryptoStoreMigration: RealmCryptoStoreMigration
+        ): RealmConfiguration {
             return RealmConfiguration.Builder()
                     .directory(directory)
                     .apply {
@@ -137,8 +139,7 @@ internal abstract class CryptoModule {
         @JvmStatic
         @Provides
         @CryptoDatabase
-        fun providesClearCacheTask(@CryptoDatabase
-                                   realmConfiguration: RealmConfiguration): ClearCacheTask {
+        fun providesClearCacheTask(@CryptoDatabase realmConfiguration: RealmConfiguration): ClearCacheTask {
             return RealmClearCacheTask(realmConfiguration)
         }
 

@@ -16,7 +16,6 @@
 
 package im.vector.app.features.spaces.invite
 
-import androidx.lifecycle.viewModelScope
 import com.airbnb.mvrx.Fail
 import com.airbnb.mvrx.Loading
 import com.airbnb.mvrx.MavericksViewModelFactory
@@ -34,6 +33,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.matrix.android.sdk.api.extensions.tryOrNull
 import org.matrix.android.sdk.api.session.Session
+import org.matrix.android.sdk.api.session.getRoomSummary
+import org.matrix.android.sdk.api.session.getUserOrDefault
 import org.matrix.android.sdk.api.session.room.model.Membership
 import org.matrix.android.sdk.api.session.room.model.RoomSummary
 import org.matrix.android.sdk.api.session.room.peeking.PeekResult
@@ -47,8 +48,8 @@ class SpaceInviteBottomSheetViewModel @AssistedInject constructor(
     init {
         session.getRoomSummary(initialState.spaceId)?.let { roomSummary ->
             val knownMembers = roomSummary.otherMemberIds.filter {
-                session.getExistingDirectRoomWithUser(it) != null
-            }.mapNotNull { session.getUser(it) }
+                session.roomService().getExistingDirectRoomWithUser(it) != null
+            }.map { session.getUserOrDefault(it) }
             // put one with avatar first, and take 5
             val peopleYouKnow = (knownMembers.filter { it.avatarUrl != null } + knownMembers.filter { it.avatarUrl == null })
                     .take(5)
@@ -56,7 +57,7 @@ class SpaceInviteBottomSheetViewModel @AssistedInject constructor(
             setState {
                 copy(
                         summary = Success(roomSummary),
-                        inviterUser = roomSummary.inviterId?.let { session.getUser(it) }?.let { Success(it) } ?: Uninitialized,
+                        inviterUser = roomSummary.inviterId?.let { session.getUserOrDefault(it) }?.let { Success(it) } ?: Uninitialized,
                         peopleYouKnow = Success(peopleYouKnow)
                 )
             }
@@ -67,11 +68,11 @@ class SpaceInviteBottomSheetViewModel @AssistedInject constructor(
     }
 
     /**
-     * Try to request the room summary api to get more info
+     * Try to request the room summary api to get more info.
      */
     private fun getLatestRoomSummary(roomSummary: RoomSummary) {
         viewModelScope.launch(Dispatchers.IO) {
-            val peekResult = tryOrNull { session.peekRoom(roomSummary.roomId) } as? PeekResult.Success ?: return@launch
+            val peekResult = tryOrNull { session.roomService().peekRoom(roomSummary.roomId) } as? PeekResult.Success ?: return@launch
             setState {
                 copy(
                         summary = Success(
@@ -100,7 +101,7 @@ class SpaceInviteBottomSheetViewModel @AssistedInject constructor(
 
     override fun handle(action: SpaceInviteBottomSheetAction) {
         when (action) {
-            SpaceInviteBottomSheetAction.DoJoin   -> {
+            SpaceInviteBottomSheetAction.DoJoin -> {
                 setState { copy(joinActionState = Loading()) }
                 session.coroutineScope.launch(Dispatchers.IO) {
                     try {

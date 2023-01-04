@@ -1,9 +1,11 @@
 plugins {
     id 'com.android.library'
-    id 'org.jetbrains.kotlin.android'
+    id 'kotlin-android'
 }
 
 android {
+    namespace "im.vector.app.config"
+
     compileSdk versions.compileSdk
 
     defaultConfig {
@@ -14,6 +16,7 @@ android {
         sourceCompatibility versions.sourceCompat
         targetCompatibility versions.targetCompat
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }

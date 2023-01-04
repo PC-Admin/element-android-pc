@@ -26,12 +26,12 @@ import org.matrix.android.sdk.api.util.Optional
  */
 interface SessionAccountDataService {
     /**
-     * Retrieve the account data with the provided type or null if not found
+     * Retrieve the account data with the provided type or null if not found.
      */
     fun getUserAccountDataEvent(type: String): UserAccountDataEvent?
 
     /**
-     * Observe the account data with the provided type
+     * Observe the account data with the provided type.
      */
     fun getLiveUserAccountDataEvent(type: String): LiveData<Optional<UserAccountDataEvent>>
 
@@ -60,7 +60,20 @@ interface SessionAccountDataService {
     fun getLiveRoomAccountDataEvents(types: Set<String>): LiveData<List<RoomAccountDataEvent>>
 
     /**
-     * Update the account data with the provided type and the provided account data content
+     * Update the account data with the provided type and the provided account data content.
      */
     suspend fun updateUserAccountData(type: String, content: Content)
+
+    /**
+     * Retrieve user account data list whose type starts with the given type.
+     * @param type the type or the starting part of a type
+     * @return list of account data whose type starts with the given type
+     */
+    fun getUserAccountDataEventsStartWith(type: String): List<UserAccountDataEvent>
+
+    /**
+     * Deletes user account data of the given type.
+     * @param type the type to delete from user account data
+     */
+    suspend fun deleteUserAccountData(type: String)
 }

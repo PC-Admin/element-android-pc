@@ -29,11 +29,12 @@ import im.vector.app.databinding.ActivitySimpleBinding
 import im.vector.app.features.analytics.plan.MobileScreen
 import im.vector.app.features.roomdirectory.RoomDirectorySharedAction
 import im.vector.app.features.roomdirectory.RoomDirectorySharedActionViewModel
+import im.vector.lib.core.utils.compat.getParcelableCompat
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
 /**
- * Simple container for [CreateRoomFragment]
+ * Simple container for [CreateRoomFragment].
  */
 @AndroidEntryPoint
 class CreateRoomActivity : VectorBaseActivity<ActivitySimpleBinding>() {
@@ -46,7 +47,7 @@ class CreateRoomActivity : VectorBaseActivity<ActivitySimpleBinding>() {
 
     override fun initUiAndData() {
         if (isFirstCreation()) {
-            val fragmentArgs: CreateRoomArgs = intent?.extras?.getParcelable(Mavericks.KEY_ARG) ?: return
+            val fragmentArgs: CreateRoomArgs = intent?.extras?.getParcelableCompat(Mavericks.KEY_ARG) ?: return
             addFragment(
                     views.simpleFragmentContainer,
                     CreateRoomFragment::class.java,
@@ -64,12 +65,12 @@ class CreateRoomActivity : VectorBaseActivity<ActivitySimpleBinding>() {
                 .onEach { sharedAction ->
                     when (sharedAction) {
                         is RoomDirectorySharedAction.Back,
-                        is RoomDirectorySharedAction.Close             -> finish()
+                        is RoomDirectorySharedAction.Close -> finish()
                         is RoomDirectorySharedAction.CreateRoomSuccess -> {
                             setResult(Activity.RESULT_OK, Intent().apply { putExtra(RESULT_CREATED_ROOM_ID, sharedAction.createdRoomId) })
                             finish()
                         }
-                        else                                           -> {
+                        else -> {
                             // nop
                         }
                     }
@@ -81,18 +82,22 @@ class CreateRoomActivity : VectorBaseActivity<ActivitySimpleBinding>() {
 
         private const val RESULT_CREATED_ROOM_ID = "RESULT_CREATED_ROOM_ID"
 
-        fun getIntent(context: Context,
-                      initialName: String = "",
-                      isSpace: Boolean = false,
-                      openAfterCreate: Boolean = true,
-                      currentSpaceId: String? = null): Intent {
+        fun getIntent(
+                context: Context,
+                initialName: String = "",
+                isSpace: Boolean = false,
+                openAfterCreate: Boolean = true,
+                currentSpaceId: String? = null
+        ): Intent {
             return Intent(context, CreateRoomActivity::class.java).apply {
-                putExtra(Mavericks.KEY_ARG, CreateRoomArgs(
+                putExtra(
+                        Mavericks.KEY_ARG, CreateRoomArgs(
                         initialName = initialName,
                         isSpace = isSpace,
                         openAfterCreate = openAfterCreate,
                         parentSpaceId = currentSpaceId
-                ))
+                )
+                )
             }
         }
 

@@ -25,35 +25,19 @@ package im.vector.app.features.analytics.plan
  */
 data class UserProperties(
         /**
-         * Whether the user has the favourites space enabled
+         * The active filter in the All Chats screen.
          */
-        val WebMetaSpaceFavouritesEnabled: Boolean? = null,
-        /**
-         * Whether the user has the home space set to all rooms
-         */
-        val WebMetaSpaceHomeAllRooms: Boolean? = null,
-        /**
-         * Whether the user has the home space enabled
-         */
-        val WebMetaSpaceHomeEnabled: Boolean? = null,
-        /**
-         * Whether the user has the other rooms space enabled
-         */
-        val WebMetaSpaceOrphansEnabled: Boolean? = null,
-        /**
-         * Whether the user has the people space enabled
-         */
-        val WebMetaSpacePeopleEnabled: Boolean? = null,
+        val allChatsActiveFilter: AllChatsActiveFilter? = null,
         /**
          * The selected messaging use case during the onboarding flow.
          */
         val ftueUseCaseSelection: FtueUseCaseSelection? = null,
         /**
-         * Number of joined rooms the user has favourited
+         * Number of joined rooms the user has favourited.
          */
         val numFavouriteRooms: Int? = null,
         /**
-         * Number of spaces (and sub-spaces) the user is joined to
+         * Number of spaces (and sub-spaces) the user is joined to.
          */
         val numSpaces: Int? = null,
 ) {
@@ -80,13 +64,32 @@ data class UserProperties(
         WorkMessaging,
     }
 
+    enum class AllChatsActiveFilter {
+
+        /**
+         * Filters are activated and All is selected.
+         */
+        All,
+
+        /**
+         * Filters are activated and Favourites is selected.
+         */
+        Favourites,
+
+        /**
+         * Filters are activated and People is selected.
+         */
+        People,
+
+        /**
+         * Filters are activated and Unreads is selected.
+         */
+        Unreads,
+    }
+
     fun getProperties(): Map<String, Any>? {
         return mutableMapOf<String, Any>().apply {
-            WebMetaSpaceFavouritesEnabled?.let { put("WebMetaSpaceFavouritesEnabled", it) }
-            WebMetaSpaceHomeAllRooms?.let { put("WebMetaSpaceHomeAllRooms", it) }
-            WebMetaSpaceHomeEnabled?.let { put("WebMetaSpaceHomeEnabled", it) }
-            WebMetaSpaceOrphansEnabled?.let { put("WebMetaSpaceOrphansEnabled", it) }
-            WebMetaSpacePeopleEnabled?.let { put("WebMetaSpacePeopleEnabled", it) }
+            allChatsActiveFilter?.let { put("allChatsActiveFilter", it.name) }
             ftueUseCaseSelection?.let { put("ftueUseCaseSelection", it.name) }
             numFavouriteRooms?.let { put("numFavouriteRooms", it) }
             numSpaces?.let { put("numSpaces", it) }

@@ -103,14 +103,12 @@ class VideoViewHolder constructor(itemView: View) :
         views.videoView.setOnPreparedListener {
             stopTimer()
             countUpTimer = CountUpTimer(100).also {
-                it.tickListener = object : CountUpTimer.TickListener {
-                    override fun onTick(milliseconds: Long) {
-                        val duration = views.videoView.duration
-                        val progress = views.videoView.currentPosition
-                        val isPlaying = views.videoView.isPlaying
-//                        Log.v("FOO", "isPlaying $isPlaying $progress/$duration")
-                        eventListener?.get()?.onEvent(AttachmentEvents.VideoEvent(isPlaying, progress, duration))
-                    }
+                it.tickListener = CountUpTimer.TickListener {
+                    val duration = views.videoView.duration
+                    val progress = views.videoView.currentPosition
+                    val isPlaying = views.videoView.isPlaying
+                    //                        Log.v("FOO", "isPlaying $isPlaying $progress/$duration")
+                    eventListener?.get()?.onEvent(AttachmentEvents.VideoEvent(isPlaying, progress, duration))
                 }
                 it.resume()
             }
@@ -146,7 +144,7 @@ class VideoViewHolder constructor(itemView: View) :
                 wasPaused = true
                 views.videoView.pause()
             }
-            is AttachmentCommands.SeekTo  -> {
+            is AttachmentCommands.SeekTo -> {
                 val duration = views.videoView.duration
                 if (duration > 0) {
                     val seekDuration = duration * (commands.percentProgress / 100f)

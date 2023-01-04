@@ -16,9 +16,12 @@
 
 package org.matrix.android.sdk.internal.database.helper
 
+import com.squareup.moshi.JsonDataException
 import io.realm.Realm
 import io.realm.RealmQuery
 import io.realm.Sort
+import org.matrix.android.sdk.api.session.events.model.UnsignedData
+import org.matrix.android.sdk.api.session.events.model.isRedacted
 import org.matrix.android.sdk.api.session.room.timeline.TimelineEvent
 import org.matrix.android.sdk.api.session.threads.ThreadNotificationState
 import org.matrix.android.sdk.internal.database.mapper.asDomain
@@ -33,6 +36,8 @@ import org.matrix.android.sdk.internal.database.query.findIncludingEvent
 import org.matrix.android.sdk.internal.database.query.findLastForwardChunkOfRoom
 import org.matrix.android.sdk.internal.database.query.where
 import org.matrix.android.sdk.internal.database.query.whereRoomId
+import org.matrix.android.sdk.internal.di.MoshiProvider
+import timber.log.Timber
 
 private typealias Summary = Pair<Int, TimelineEventEntity>?
 
@@ -42,27 +47,29 @@ private typealias Summary = Pair<Int, TimelineEventEntity>?
  */
 internal fun Map<String, EventEntity>.updateThreadSummaryIfNeeded(
         roomId: String,
-        realm: Realm, currentUserId: String,
+        realm: Realm,
+        currentUserId: String,
         chunkEntity: ChunkEntity? = null,
-        shouldUpdateNotifications: Boolean = true) {
+        shouldUpdateNotifications: Boolean = true
+) {
     for ((rootThreadEventId, eventEntity) in this) {
         eventEntity.threadSummaryInThread(eventEntity.realm, rootThreadEventId, chunkEntity)?.let { threadSummary ->
 
-            val numberOfMessages = threadSummary.first
+            val inThreadMessages = threadSummary.first
             val latestEventInThread = threadSummary.second
 
             // If this is a thread message, find its root event if exists
             val rootThreadEvent = if (eventEntity.isThread()) eventEntity.findRootThreadEvent() else eventEntity
 
             rootThreadEvent?.markEventAsRoot(
-                    threadsCounted = numberOfMessages,
+                    inThreadMessages = inThreadMessages,
                     latestMessageTimelineEventEntity = latestEventInThread
             )
-        }
-    }
 
-    if (shouldUpdateNotifications) {
-        updateNotificationsNew(roomId, realm, currentUserId)
+            if (shouldUpdateNotifications) {
+                updateThreadNotifications(roomId, realm, currentUserId, rootThreadEventId)
+            }
+        }
     }
 }
 
@@ -78,31 +85,33 @@ internal fun EventEntity.findRootThreadEvent(): EventEntity? =
         }
 
 /**
- * Mark or update the current event a root thread event
+ * Mark or update the current event a root thread event.
  */
 internal fun EventEntity.markEventAsRoot(
-        threadsCounted: Int,
-        latestMessageTimelineEventEntity: TimelineEventEntity?) {
+        inThreadMessages: Int,
+        latestMessageTimelineEventEntity: TimelineEventEntity?
+) {
     isRootThread = true
-    numberOfThreads = threadsCounted
+    numberOfThreads = inThreadMessages
     threadSummaryLatestMessage = latestMessageTimelineEventEntity
 }
 
 /**
- * Count the number of threads for the provided root thread eventId, and finds the latest event message
+ * Count the number of threads for the provided root thread eventId, and finds the latest event message.
+ * Note: Redactions are handled by RedactionEventProcessor.
+ * @param realm the realm database
  * @param rootThreadEventId The root eventId that will find the number of threads
+ * @param chunkEntity the chunk entity
  * @return A ThreadSummary containing the counted threads and the latest event message
  */
 internal fun EventEntity.threadSummaryInThread(realm: Realm, rootThreadEventId: String, chunkEntity: ChunkEntity?): Summary {
-    // Number of messages
-    val messages = TimelineEventEntity
-            .whereRoomId(realm, roomId = roomId)
-            .equalTo(TimelineEventEntityFields.ROOT.ROOT_THREAD_EVENT_ID, rootThreadEventId)
-            .distinct(TimelineEventEntityFields.ROOT.EVENT_ID)
-            .count()
-            .toInt()
+    val inThreadMessages = countInThreadMessages(
+            realm = realm,
+            roomId = roomId,
+            rootThreadEventId = rootThreadEventId
+    )
 
-    if (messages <= 0) return null
+    if (inThreadMessages <= 0) return null
 
     // Find latest thread event, we know it exists
     var chunk = ChunkEntity.findLastForwardChunkOfRoom(realm, roomId) ?: chunkEntity ?: return null
@@ -124,12 +133,41 @@ internal fun EventEntity.threadSummaryInThread(realm: Realm, rootThreadEventId: 
 
     result ?: return null
 
-    return Summary(messages, result)
+    return Summary(inThreadMessages, result)
 }
 
 /**
+ * Counts the number of thread replies in the main timeline thread summary,
+ * with respect to redactions.
+ */
+internal fun countInThreadMessages(realm: Realm, roomId: String, rootThreadEventId: String): Int =
+        TimelineEventEntity
+                .whereRoomId(realm, roomId = roomId)
+                .equalTo(TimelineEventEntityFields.ROOT.ROOT_THREAD_EVENT_ID, rootThreadEventId)
+                .distinct(TimelineEventEntityFields.ROOT.EVENT_ID)
+                .findAll()
+                .filterNot { timelineEvent ->
+                    timelineEvent.root
+                            ?.unsignedData
+                            ?.takeIf { it.isNotBlank() }
+                            ?.toUnsignedData()
+                            .isRedacted()
+                }.size
+
+/**
+ * Mapping string to UnsignedData using Moshi.
+ */
+private fun String.toUnsignedData(): UnsignedData? =
+        try {
+            MoshiProvider.providesMoshi().adapter(UnsignedData::class.java).fromJson(this)
+        } catch (ex: JsonDataException) {
+            Timber.e(ex, "Failed to parse UnsignedData")
+            null
+        }
+
+/**
  * Lets compare them in case user is moving forward in the timeline and we cannot know the
- * exact chunk sequence while currentChunk is not yet committed in the DB
+ * exact chunk sequence while currentChunk is not yet committed in the DB.
  */
 private fun findMostRecentEvent(result: TimelineEventEntity, currentChunkLatestEvent: TimelineEventEntity?): TimelineEventEntity {
     currentChunkLatestEvent ?: return result
@@ -142,7 +180,7 @@ private fun findMostRecentEvent(result: TimelineEventEntity, currentChunkLatestE
 }
 
 /**
- * Find the latest event of the current chunk
+ * Find the latest event of the current chunk.
  */
 private fun findLatestSortedChunkEvent(chunk: ChunkEntity, rootThreadEventId: String): TimelineEventEntity? =
         chunk.timelineEvents.sort(TimelineEventEntityFields.DISPLAY_INDEX, Sort.DESCENDING)?.firstOrNull {
@@ -150,7 +188,8 @@ private fun findLatestSortedChunkEvent(chunk: ChunkEntity, rootThreadEventId: St
         }
 
 /**
- * Find all TimelineEventEntity that are root threads for the specified room
+ * Find all TimelineEventEntity that are root threads for the specified room.
+ * @param realm the realm instance
  * @param roomId The room that all stored root threads will be returned
  */
 internal fun TimelineEventEntity.Companion.findAllThreadsForRoomId(realm: Realm, roomId: String): RealmQuery<TimelineEventEntity> =
@@ -161,7 +200,7 @@ internal fun TimelineEventEntity.Companion.findAllThreadsForRoomId(realm: Realm,
                 .sort("${TimelineEventEntityFields.ROOT.THREAD_SUMMARY_LATEST_MESSAGE}.${TimelineEventEntityFields.ROOT.ORIGIN_SERVER_TS}", Sort.DESCENDING)
 
 /**
- * Map each root thread TimelineEvent with the equivalent decrypted text edition/replacement
+ * Map each root thread TimelineEvent with the equivalent decrypted text edition/replacement.
  */
 internal fun List<TimelineEvent>.mapEventsWithEdition(realm: Realm, roomId: String): List<TimelineEvent> =
         this.map {
@@ -174,15 +213,18 @@ internal fun List<TimelineEvent>.mapEventsWithEdition(realm: Realm, roomId: Stri
                     ?.eventId
                     ?.let { editedEventId ->
                         TimelineEventEntity.where(realm, roomId, eventId = editedEventId).findFirst()?.let { editedEvent ->
-                            it.root.threadDetails = it.root.threadDetails?.copy(lastRootThreadEdition = editedEvent.root?.asDomain()?.getDecryptedTextSummary()
-                                    ?: "(edited)")
+                            it.root.threadDetails = it.root.threadDetails?.copy(
+                                    lastRootThreadEdition = editedEvent.root?.asDomain()?.getDecryptedTextSummary()
+                                            ?: "(edited)"
+                            )
                             it
                         } ?: it
                     } ?: it
         }
 
 /**
- * Returns a list of all the marked unread threads that exists for the specified room
+ * Returns a list of all the marked unread threads that exists for the specified room.
+ * @param realm the realm instance
  * @param roomId The roomId that the user is currently in
  */
 internal fun TimelineEventEntity.Companion.findAllLocalThreadNotificationsForRoomId(realm: Realm, roomId: String): RealmQuery<TimelineEventEntity> =
@@ -196,7 +238,8 @@ internal fun TimelineEventEntity.Companion.findAllLocalThreadNotificationsForRoo
                 .endGroup()
 
 /**
- * Returns whether or not the given user is participating in a current thread
+ * Returns whether or not the given user is participating in a current thread.
+ * @param realm the realm instance
  * @param roomId the room that the thread exists
  * @param rootThreadEventId the thread that the search will be done
  * @param senderId the user that will try to find participation
@@ -211,7 +254,8 @@ internal fun TimelineEventEntity.Companion.isUserParticipatingInThread(realm: Re
                 ?: false
 
 /**
- * Returns whether or not the given user is mentioned in a current thread
+ * Returns whether or not the given user is mentioned in a current thread.
+ * @param realm the realm instance
  * @param roomId the room that the thread exists
  * @param rootThreadEventId the thread that the search will be done
  * @param userId the user that will try to find if there is a mention
@@ -227,15 +271,15 @@ internal fun TimelineEventEntity.Companion.isUserMentionedInThread(realm: Realm,
                 ?: false
 
 /**
- * Find the read receipt for the current user
+ * Find the read receipt for the current user.
  */
-internal fun findMyReadReceipt(realm: Realm, roomId: String, userId: String): String? =
-        ReadReceiptEntity.where(realm, roomId = roomId, userId = userId)
+internal fun findMyReadReceipt(realm: Realm, roomId: String, userId: String, threadId: String?): String? =
+        ReadReceiptEntity.where(realm, roomId = roomId, userId = userId, threadId = threadId)
                 .findFirst()
                 ?.eventId
 
 /**
- * Returns whether or not the user is mentioned in the event
+ * Returns whether or not the user is mentioned in the event.
  */
 internal fun isUserMentioned(currentUserId: String, timelineEventEntity: TimelineEventEntity?): Boolean {
     return timelineEventEntity?.root?.asDomain()?.isUserMentioned(currentUserId) == true
@@ -249,28 +293,29 @@ internal fun isUserMentioned(currentUserId: String, timelineEventEntity: Timelin
  * Important: It will work only with the latest chunk, while read marker will be changed
  * immediately so we should not display wrong notifications
  */
-internal fun updateNotificationsNew(roomId: String, realm: Realm, currentUserId: String) {
-    val readReceipt = findMyReadReceipt(realm, roomId, currentUserId) ?: return
+internal fun updateThreadNotifications(roomId: String, realm: Realm, currentUserId: String, rootThreadEventId: String) {
+    val readReceipt = findMyReadReceipt(realm, roomId, currentUserId, threadId = rootThreadEventId) ?: return
 
     val readReceiptChunk = ChunkEntity
             .findIncludingEvent(realm, readReceipt) ?: return
 
-    val readReceiptChunkTimelineEvents = readReceiptChunk
+    val readReceiptChunkThreadEvents = readReceiptChunk
             .timelineEvents
             .where()
             .equalTo(TimelineEventEntityFields.ROOM_ID, roomId)
+            .equalTo(TimelineEventEntityFields.ROOT.ROOT_THREAD_EVENT_ID, rootThreadEventId)
             .sort(TimelineEventEntityFields.DISPLAY_INDEX, Sort.ASCENDING)
             .findAll() ?: return
 
-    val readReceiptChunkPosition = readReceiptChunkTimelineEvents.indexOfFirst { it.eventId == readReceipt }
+    val readReceiptChunkPosition = readReceiptChunkThreadEvents.indexOfFirst { it.eventId == readReceipt }
 
     if (readReceiptChunkPosition == -1) return
 
-    if (readReceiptChunkPosition < readReceiptChunkTimelineEvents.lastIndex) {
+    if (readReceiptChunkPosition < readReceiptChunkThreadEvents.lastIndex) {
         // If the read receipt is found inside the chunk
 
-        val threadEventsAfterReadReceipt = readReceiptChunkTimelineEvents
-                .slice(readReceiptChunkPosition..readReceiptChunkTimelineEvents.lastIndex)
+        val threadEventsAfterReadReceipt = readReceiptChunkThreadEvents
+                .slice(readReceiptChunkPosition..readReceiptChunkThreadEvents.lastIndex)
                 .filter { it.root?.isThread() == true }
 
         // In order for the below code to work for old events, we should save the previous read receipt
@@ -299,25 +344,21 @@ internal fun updateNotificationsNew(roomId: String, realm: Realm, currentUserId:
                     it.root?.rootThreadEventId
                 }
 
-        // Find the root events in the new thread events
-        val rootThreads = threadEventsAfterReadReceipt.distinctBy { it.root?.rootThreadEventId }.mapNotNull { it.root?.rootThreadEventId }
+        // Update root thread event only if the user have participated in
+        val isUserParticipating = TimelineEventEntity.isUserParticipatingInThread(
+                realm = realm,
+                roomId = roomId,
+                rootThreadEventId = rootThreadEventId,
+                senderId = currentUserId
+        )
+        val rootThreadEventEntity = EventEntity.where(realm, rootThreadEventId).findFirst()
 
-        // Update root thread events only if the user have participated in
-        rootThreads.forEach { eventId ->
-            val isUserParticipating = TimelineEventEntity.isUserParticipatingInThread(
-                    realm = realm,
-                    roomId = roomId,
-                    rootThreadEventId = eventId,
-                    senderId = currentUserId)
-            val rootThreadEventEntity = EventEntity.where(realm, eventId).findFirst()
+        if (isUserParticipating) {
+            rootThreadEventEntity?.threadNotificationState = ThreadNotificationState.NEW_MESSAGE
+        }
 
-            if (isUserParticipating) {
-                rootThreadEventEntity?.threadNotificationState = ThreadNotificationState.NEW_MESSAGE
-            }
-
-            if (userMentionsList.contains(eventId)) {
-                rootThreadEventEntity?.threadNotificationState = ThreadNotificationState.NEW_HIGHLIGHTED_MESSAGE
-            }
+        if (userMentionsList.contains(rootThreadEventId)) {
+            rootThreadEventEntity?.threadNotificationState = ThreadNotificationState.NEW_HIGHLIGHTED_MESSAGE
         }
     }
 }

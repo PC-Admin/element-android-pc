@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for taking the time to propose a new feature or make a suggestion.
+        Thank you for taking the time to propose an enhancement to an existing feature. If you would like to propose a new feature or a major cross-platform change, please [start a discussion here](https://github.com/vector-im/element-meta/discussions/new?category=ideas).
   - type: textarea
     id: usecase
     attributes:
@@ -34,3 +34,14 @@ body:
       placeholder: Is there anything else you'd like to add?
     validations:
       required: false
+  - type: dropdown
+    id: pr
+    attributes:
+      label: Are you willing to provide a PR?
+      description:  |
+        Don't worry, it's still OK to answer 'No' :).
+      options:
+        - 'Yes'
+        - 'No'
+    validations:
+      required: true

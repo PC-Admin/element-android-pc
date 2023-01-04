@@ -31,6 +31,8 @@ import im.vector.app.core.epoxy.LoadingItem_
 import im.vector.app.core.extensions.localDateTime
 import im.vector.app.core.extensions.nextOrNull
 import im.vector.app.core.extensions.prevOrNull
+import im.vector.app.core.time.Clock
+import im.vector.app.features.home.AvatarRenderer
 import im.vector.app.features.home.room.detail.JitsiState
 import im.vector.app.features.home.room.detail.RoomDetailAction
 import im.vector.app.features.home.room.detail.RoomDetailViewState
@@ -56,6 +58,7 @@ import im.vector.app.features.home.room.detail.timeline.item.MessageInformationD
 import im.vector.app.features.home.room.detail.timeline.item.ReactionsSummaryEvents
 import im.vector.app.features.home.room.detail.timeline.item.ReadReceiptData
 import im.vector.app.features.home.room.detail.timeline.item.ReadReceiptsItem
+import im.vector.app.features.home.room.detail.timeline.item.TypingItem_
 import im.vector.app.features.home.room.detail.timeline.url.PreviewUrlRetriever
 import im.vector.app.features.media.AttachmentData
 import im.vector.app.features.media.ImageContentRenderer
@@ -71,6 +74,7 @@ import org.matrix.android.sdk.api.session.room.model.RoomSummary
 import org.matrix.android.sdk.api.session.room.model.message.MessageAudioContent
 import org.matrix.android.sdk.api.session.room.model.message.MessageImageInfoContent
 import org.matrix.android.sdk.api.session.room.model.message.MessageVideoContent
+import org.matrix.android.sdk.api.session.room.read.ReadService
 import org.matrix.android.sdk.api.session.room.timeline.Timeline
 import org.matrix.android.sdk.api.session.room.timeline.TimelineEvent
 import timber.log.Timber
@@ -78,30 +82,33 @@ import javax.inject.Inject
 import kotlin.math.min
 import kotlin.system.measureTimeMillis
 
-class TimelineEventController @Inject constructor(private val dateFormatter: VectorDateFormatter,
-                                                  private val vectorPreferences: VectorPreferences,
-                                                  private val contentUploadStateTrackerBinder: ContentUploadStateTrackerBinder,
-                                                  private val contentDownloadStateTrackerBinder: ContentDownloadStateTrackerBinder,
-                                                  private val timelineItemFactory: TimelineItemFactory,
-                                                  private val timelineMediaSizeProvider: TimelineMediaSizeProvider,
-                                                  private val mergedHeaderItemFactory: MergedHeaderItemFactory,
-                                                  private val session: Session,
-                                                  @TimelineEventControllerHandler
-                                                  private val backgroundHandler: Handler,
-                                                  private val timelineEventVisibilityHelper: TimelineEventVisibilityHelper,
-                                                  private val readReceiptsItemFactory: ReadReceiptsItemFactory,
-                                                  private val reactionListFactory: ReactionsSummaryFactory
+class TimelineEventController @Inject constructor(
+        private val dateFormatter: VectorDateFormatter,
+        private val vectorPreferences: VectorPreferences,
+        private val contentUploadStateTrackerBinder: ContentUploadStateTrackerBinder,
+        private val contentDownloadStateTrackerBinder: ContentDownloadStateTrackerBinder,
+        private val timelineItemFactory: TimelineItemFactory,
+        private val timelineMediaSizeProvider: TimelineMediaSizeProvider,
+        private val mergedHeaderItemFactory: MergedHeaderItemFactory,
+        private val session: Session,
+        @TimelineEventControllerHandler
+        private val backgroundHandler: Handler,
+        private val timelineEventVisibilityHelper: TimelineEventVisibilityHelper,
+        private val readReceiptsItemFactory: ReadReceiptsItemFactory,
+        private val reactionListFactory: ReactionsSummaryFactory,
+        private val clock: Clock,
+        private val avatarRenderer: AvatarRenderer,
 ) : EpoxyController(backgroundHandler, backgroundHandler), Timeline.Listener, EpoxyController.Interceptor {
 
     /**
-     * This is a partial state of the RoomDetailViewState
+     * This is a partial state of the RoomDetailViewState.
      */
     data class PartialState(
             val unreadState: UnreadState = UnreadState.Unknown,
             val highlightedEventId: String? = null,
             val jitsiState: JitsiState = JitsiState(),
             val roomSummary: RoomSummary? = null,
-            val rootThreadEventId: String? = null
+            val rootThreadEventId: String? = null,
     ) {
 
         constructor(state: RoomDetailViewState) : this(
@@ -109,7 +116,7 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
                 highlightedEventId = state.highlightedEventId,
                 jitsiState = state.jitsiState,
                 roomSummary = state.asyncRoomSummary(),
-                rootThreadEventId = state.rootThreadEventId
+                rootThreadEventId = state.rootThreadEventId,
         )
 
         fun isFromThreadTimeline(): Boolean = rootThreadEventId != null
@@ -128,10 +135,13 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         fun onEventVisible(event: TimelineEvent)
         fun onRoomCreateLinkClicked(url: String)
         fun onEncryptedMessageClicked(informationData: MessageInformationData, view: View)
-        fun onImageMessageClicked(messageImageContent: MessageImageInfoContent,
-                                  mediaData: ImageContentRenderer.Data,
-                                  view: View,
-                                  inMemory: List<AttachmentData>)
+        fun onImageMessageClicked(
+                messageImageContent: MessageImageInfoContent,
+                mediaData: ImageContentRenderer.Data,
+                view: View,
+                inMemory: List<AttachmentData>
+        )
+
         fun onVideoMessageClicked(messageVideoContent: MessageVideoContent, mediaData: VideoContentRenderer.Data, view: View)
 
         //        fun onFileMessageClicked(eventId: String, messageFileContent: MessageFileContent)
@@ -145,6 +155,10 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         fun getPreviewUrlRetriever(): PreviewUrlRetriever
 
         fun onVoiceControlButtonClicked(eventId: String, messageAudioContent: MessageAudioContent)
+        fun onVoiceWaveformTouchedUp(eventId: String, duration: Int, percentage: Float)
+        fun onVoiceWaveformMovedTo(eventId: String, duration: Int, percentage: Float)
+
+        fun onAudioSeekBarMovedTo(eventId: String, duration: Int, percentage: Float)
 
         fun onAddMoreReaction(event: TimelineEvent)
     }
@@ -204,8 +218,10 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         override fun onChanged(position: Int, count: Int, payload: Any?) {
             synchronized(modelCache) {
                 assertUpdateCallbacksAllowed()
-                Timber.v("listUpdateCallback.onChanged(position: $position, count: $count). " +
-                        "\ncurrentSnapshot has size of ${currentSnapshot.size} items")
+                Timber.v(
+                        "listUpdateCallback.onChanged(position: $position, count: $count). " +
+                                "\ncurrentSnapshot has size of ${currentSnapshot.size} items"
+                )
                 (position until position + count).forEach {
                     // Invalidate cache
                     modelCache[it] = null
@@ -233,8 +249,10 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         override fun onMoved(fromPosition: Int, toPosition: Int) {
             synchronized(modelCache) {
                 assertUpdateCallbacksAllowed()
-                Timber.v("listUpdateCallback.onMoved(fromPosition: $fromPosition, toPosition: $toPosition). " +
-                        "\ncurrentSnapshot has size of ${currentSnapshot.size} items")
+                Timber.v(
+                        "listUpdateCallback.onMoved(fromPosition: $fromPosition, toPosition: $toPosition). " +
+                                "\ncurrentSnapshot has size of ${currentSnapshot.size} items"
+                )
                 val model = modelCache.removeAt(fromPosition)
                 modelCache.add(toPosition, model)
                 requestModelBuild()
@@ -244,8 +262,10 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         override fun onInserted(position: Int, count: Int) {
             synchronized(modelCache) {
                 assertUpdateCallbacksAllowed()
-                Timber.v("listUpdateCallback.onInserted(position: $position, count: $count). " +
-                        "\ncurrentSnapshot has size of ${currentSnapshot.size} items")
+                Timber.v(
+                        "listUpdateCallback.onInserted(position: $position, count: $count). " +
+                                "\ncurrentSnapshot has size of ${currentSnapshot.size} items"
+                )
                 repeat(count) {
                     modelCache.add(position, null)
                 }
@@ -256,8 +276,10 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         override fun onRemoved(position: Int, count: Int) {
             synchronized(modelCache) {
                 assertUpdateCallbacksAllowed()
-                Timber.v("listUpdateCallback.onRemoved(position: $position, count: $count). " +
-                        "\ncurrentSnapshot has size of ${currentSnapshot.size} items")
+                Timber.v(
+                        "listUpdateCallback.onRemoved(position: $position, count: $count). " +
+                                "\ncurrentSnapshot has size of ${currentSnapshot.size} items"
+                )
                 repeat(count) {
                     modelCache.removeAt(position)
                 }
@@ -268,7 +290,7 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
 
     private val interceptorHelper = TimelineControllerInterceptorHelper(
             ::positionOfReadMarker,
-            adapterPositionMapping
+            adapterPositionMapping,
     )
 
     init {
@@ -309,12 +331,18 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         if (partialState.roomSummary?.membership != Membership.JOIN) {
             return
         }
-        val timestamp = System.currentTimeMillis()
+        val timestamp = clock.epochMillis()
 
         val showingForwardLoader = LoadingItem_()
                 .id("forward_loading_item_$timestamp")
                 .setVisibilityStateChangedListener(Timeline.Direction.FORWARDS)
                 .addWhenLoading(Timeline.Direction.FORWARDS)
+
+        if (!showingForwardLoader) {
+            val typingUsers = partialState.roomSummary?.typingUsers.orEmpty()
+            val typingItem = TypingItem_().id("typing_view").avatarRenderer(avatarRenderer).users(typingUsers)
+            add(typingItem)
+        }
 
         val timelineModels = getModels()
         add(timelineModels)
@@ -401,18 +429,21 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
                             timelineEvent = it,
                             highlightedEventId = partialState.highlightedEventId,
                             isFromThreadTimeline = partialState.isFromThreadTimeline(),
-                            rootThreadEventId = partialState.rootThreadEventId)
+                            rootThreadEventId = partialState.rootThreadEventId
+                    )
                 }
                 val nextDisplayableEvent = currentSnapshot.subList(position + 1, currentSnapshot.size).firstOrNull {
                     timelineEventVisibilityHelper.shouldShowEvent(
                             timelineEvent = it,
                             highlightedEventId = partialState.highlightedEventId,
                             isFromThreadTimeline = partialState.isFromThreadTimeline(),
-                            rootThreadEventId = partialState.rootThreadEventId)
+                            rootThreadEventId = partialState.rootThreadEventId
+                    )
                 }
                 val timelineEventsGroup = timelineEventsGroups.getOrNull(event)
                 val params = TimelineItemFactoryParams(
                         event = event,
+                        lastEdit = event.annotations?.editSummary?.latestEdit,
                         prevEvent = prevEvent,
                         prevDisplayableEvent = prevDisplayableEvent,
                         nextEvent = nextEvent,
@@ -456,12 +487,15 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
         )
     }
 
-    private fun CacheItemData.enrichWithModels(event: TimelineEvent,
-                                               nextEvent: TimelineEvent?,
-                                               position: Int,
-                                               receiptsByEvents: Map<String, List<ReadReceipt>>): CacheItemData {
+    private fun CacheItemData.enrichWithModels(
+            event: TimelineEvent,
+            nextEvent: TimelineEvent?,
+            position: Int,
+            receiptsByEvents: Map<String, List<ReadReceipt>>
+    ): CacheItemData {
         val wantsDateSeparator = wantsDateSeparator(event, nextEvent)
-        val mergedHeaderModel = mergedHeaderItemFactory.create(event,
+        val mergedHeaderModel = mergedHeaderItemFactory.create(
+                event,
                 nextEvent = nextEvent,
                 partialState = partialState,
                 items = this@TimelineEventController.currentSnapshot,
@@ -483,7 +517,7 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
                         event.eventId,
                         readReceipts,
                         callback,
-                        partialState.isFromThreadTimeline()
+                        partialState.isFromThreadTimeline(),
                 ),
                 formattedDayModel = formattedDayModel,
                 mergedHeaderModel = mergedHeaderModel
@@ -526,13 +560,14 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
             val event = itr.previous()
             timelineEventsGroups.addOrIgnore(event)
             val currentReadReceipts = ArrayList(event.readReceipts).filter {
-                it.roomMember.userId != session.myUserId
+                it.roomMember.userId != session.myUserId && it.isVisibleInThisThread()
             }
             if (timelineEventVisibilityHelper.shouldShowEvent(
                             timelineEvent = event,
                             highlightedEventId = partialState.highlightedEventId,
                             isFromThreadTimeline = partialState.isFromThreadTimeline(),
-                            rootThreadEventId = partialState.rootThreadEventId)) {
+                            rootThreadEventId = partialState.rootThreadEventId
+                    )) {
                 lastShownEventId = event.eventId
             }
             if (lastShownEventId == null) {
@@ -540,6 +575,14 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
             }
             val existingReceipts = receiptsByEvent.getOrPut(lastShownEventId) { ArrayList() }
             existingReceipts.addAll(currentReadReceipts)
+        }
+    }
+
+    private fun ReadReceipt.isVisibleInThisThread(): Boolean {
+        return if (partialState.isFromThreadTimeline()) {
+            this.threadId == partialState.rootThreadEventId
+        } else {
+            this.threadId == null || this.threadId == ReadService.THREAD_ID_MAIN
         }
     }
 
@@ -579,17 +622,18 @@ class TimelineEventController @Inject constructor(private val dateFormatter: Vec
     }
 
     private fun wantsDateSeparator(event: TimelineEvent, nextEvent: TimelineEvent?): Boolean {
-        return if (hasReachedInvite && hasUTD) {
-            true
-        } else {
-            val date = event.root.localDateTime()
-            val nextDate = nextEvent?.root?.localDateTime()
-            date.toLocalDate() != nextDate?.toLocalDate()
+        return when {
+            hasReachedInvite && hasUTD -> true
+            else -> {
+                val date = event.root.localDateTime()
+                val nextDate = nextEvent?.root?.localDateTime()
+                date.toLocalDate() != nextDate?.toLocalDate()
+            }
         }
     }
 
     /**
-     * Return true if added
+     * Return true if added.
      */
     private fun LoadingItem_.addWhenLoading(direction: Timeline.Direction): Boolean {
         val host = this@TimelineEventController

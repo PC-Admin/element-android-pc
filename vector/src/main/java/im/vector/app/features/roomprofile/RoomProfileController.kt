@@ -27,6 +27,7 @@ import im.vector.app.core.resources.DrawableProvider
 import im.vector.app.core.resources.StringProvider
 import im.vector.app.core.ui.list.genericFooterItem
 import im.vector.app.core.ui.list.genericPositiveButtonItem
+import im.vector.app.features.form.formSwitchItem
 import im.vector.app.features.home.ShortcutCreator
 import im.vector.app.features.home.room.detail.timeline.TimelineEventController
 import im.vector.app.features.home.room.detail.timeline.tools.createLinkMovementMethod
@@ -34,7 +35,7 @@ import im.vector.app.features.settings.VectorPreferences
 import im.vector.lib.core.utils.epoxy.charsequence.toEpoxyCharSequence
 import me.gujun.android.span.image
 import me.gujun.android.span.span
-import org.matrix.android.sdk.api.crypto.RoomEncryptionTrustLevel
+import org.matrix.android.sdk.api.session.crypto.model.RoomEncryptionTrustLevel
 import org.matrix.android.sdk.api.session.room.model.RoomEncryptionAlgorithm
 import org.matrix.android.sdk.api.session.room.model.RoomSummary
 import javax.inject.Inject
@@ -66,6 +67,8 @@ class RoomProfileController @Inject constructor(
         fun onUrlInTopicLongClicked(url: String)
         fun doMigrateToVersion(newVersion: String)
         fun restoreEncryptionState()
+        fun setEncryptedToVerifiedDevicesOnly(enabled: Boolean)
+        fun openGlobalBlockSettings()
     }
 
     override fun buildModels(data: RoomProfileViewState?) {
@@ -175,15 +178,64 @@ class RoomProfileController @Inject constructor(
         }
         buildEncryptionAction(data.actionPermissions, roomSummary)
 
+        if (roomSummary.isEncrypted && !encryptionMisconfigured) {
+            data.globalCryptoConfig.invoke()?.let { globalConfig ->
+                if (globalConfig.globalBlockUnverifiedDevices) {
+                    genericFooterItem {
+                        id("globalConfig")
+                        centered(false)
+                        text(
+                                span {
+                                    +host.stringProvider.getString(R.string.room_settings_global_block_unverified_info_text)
+                                    apply {
+                                        if (data.unverifiedDevicesInTheRoom.invoke() == true) {
+                                            +"\n"
+                                            +host.stringProvider.getString(R.string.some_devices_will_not_be_able_to_decrypt)
+                                        }
+                                    }
+                                }.toEpoxyCharSequence()
+                        )
+                        itemClickAction {
+                            host.callback?.openGlobalBlockSettings()
+                        }
+                    }
+                } else {
+                    // per room setting is available
+                    val shouldBlockUnverified = data.encryptToVerifiedDeviceOnly.invoke()
+                    formSwitchItem {
+                        id("send_to_unverified")
+                        enabled(shouldBlockUnverified != null)
+                        title(host.stringProvider.getString(R.string.encryption_never_send_to_unverified_devices_in_room))
+
+                        switchChecked(shouldBlockUnverified ?: false)
+
+                        apply {
+                            if (shouldBlockUnverified == true && data.unverifiedDevicesInTheRoom.invoke() == true) {
+                                summary(
+                                        host.stringProvider.getString(R.string.some_devices_will_not_be_able_to_decrypt)
+                                )
+                            } else {
+                                summary(null)
+                            }
+                        }
+                        listener { value ->
+                            host.callback?.setEncryptedToVerifiedDevicesOnly(value)
+                        }
+                    }
+                }
+            }
+        }
         // More
         buildProfileSection(stringProvider.getString(R.string.room_profile_section_more))
         buildProfileAction(
                 id = "settings",
-                title = stringProvider.getString(if (roomSummary.isDirect) {
-                    R.string.direct_room_profile_section_more_settings
-                } else {
-                    R.string.room_profile_section_more_settings
-                }),
+                title = stringProvider.getString(
+                        if (roomSummary.isDirect) {
+                            R.string.direct_room_profile_section_more_settings
+                        } else {
+                            R.string.room_profile_section_more_settings
+                        }
+                ),
                 icon = R.drawable.ic_room_profile_settings,
                 action = { callback?.onSettingsClicked() }
         )
@@ -228,11 +280,13 @@ class RoomProfileController @Inject constructor(
         }
         buildProfileAction(
                 id = "leave",
-                title = stringProvider.getString(if (roomSummary.isDirect) {
-                    R.string.direct_room_profile_section_more_leave
-                } else {
-                    R.string.room_profile_section_more_leave
-                }),
+                title = stringProvider.getString(
+                        if (roomSummary.isDirect) {
+                            R.string.direct_room_profile_section_more_leave
+                        } else {
+                            R.string.room_profile_section_more_leave
+                        }
+                ),
                 divider = false,
                 destructive = true,
                 icon = R.drawable.ic_room_actions_leave,

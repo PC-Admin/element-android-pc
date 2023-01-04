@@ -18,6 +18,7 @@ package im.vector.app.features.home.room.threads.list.views
 
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
@@ -25,10 +26,12 @@ import androidx.core.view.isVisible
 import com.airbnb.mvrx.args
 import com.airbnb.mvrx.fragmentViewModel
 import com.airbnb.mvrx.withState
+import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.R
 import im.vector.app.core.extensions.cleanup
 import im.vector.app.core.extensions.configureWith
 import im.vector.app.core.platform.VectorBaseFragment
+import im.vector.app.core.platform.VectorMenuProvider
 import im.vector.app.databinding.FragmentThreadListBinding
 import im.vector.app.features.analytics.plan.MobileScreen
 import im.vector.app.features.home.AvatarRenderer
@@ -37,19 +40,28 @@ import im.vector.app.features.home.room.threads.ThreadsActivity
 import im.vector.app.features.home.room.threads.arguments.ThreadListArgs
 import im.vector.app.features.home.room.threads.arguments.ThreadTimelineArgs
 import im.vector.app.features.home.room.threads.list.viewmodel.ThreadListController
+import im.vector.app.features.home.room.threads.list.viewmodel.ThreadListPagedController
 import im.vector.app.features.home.room.threads.list.viewmodel.ThreadListViewModel
 import im.vector.app.features.home.room.threads.list.viewmodel.ThreadListViewState
+import im.vector.app.features.rageshake.BugReporter
+import im.vector.app.features.rageshake.ReportType
 import org.matrix.android.sdk.api.session.room.threads.model.ThreadSummary
 import org.matrix.android.sdk.api.session.room.timeline.TimelineEvent
 import org.matrix.android.sdk.api.util.MatrixItem
 import javax.inject.Inject
 
-class ThreadListFragment @Inject constructor(
-        private val avatarRenderer: AvatarRenderer,
-        private val threadListController: ThreadListController,
-        val threadListViewModelFactory: ThreadListViewModel.Factory
-) : VectorBaseFragment<FragmentThreadListBinding>(),
-        ThreadListController.Listener {
+@AndroidEntryPoint
+class ThreadListFragment :
+        VectorBaseFragment<FragmentThreadListBinding>(),
+        ThreadListPagedController.Listener,
+        ThreadListController.Listener,
+        VectorMenuProvider {
+
+    @Inject lateinit var avatarRenderer: AvatarRenderer
+    @Inject lateinit var bugReporter: BugReporter
+    @Inject lateinit var threadListController: ThreadListPagedController
+    @Inject lateinit var legacyThreadListController: ThreadListController
+    @Inject lateinit var threadListViewModelFactory: ThreadListViewModel.Factory
 
     private val threadListViewModel: ThreadListViewModel by fragmentViewModel()
 
@@ -66,13 +78,34 @@ class ThreadListFragment @Inject constructor(
         analyticsScreenName = MobileScreen.ScreenName.ThreadList
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+    override fun handlePostCreateMenu(menu: Menu) {
+        // We use a custom layout for this menu item, so we need to set a ClickListener
+        menu.findItem(R.id.menu_thread_list_filter)?.let { menuItem ->
+            menuItem.actionView?.debouncedClicks {
+                handleMenuItemSelected(menuItem)
+            }
+        }
+    }
+
+    override fun handleMenuItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.menu_thread_list_filter -> {
                 ThreadListBottomSheet().show(childFragmentManager, "Filtering")
                 true
             }
-            else                         -> super.onOptionsItemSelected(item)
+            else -> false
+        }
+    }
+
+    override fun handlePrepareMenu(menu: Menu) {
+        withState(threadListViewModel) { state ->
+            val filterIcon = menu.findItem(R.id.menu_thread_list_filter).actionView ?: return@withState
+            val filterBadge = filterIcon.findViewById<View>(R.id.threadListFilterBadge)
+            filterBadge.isVisible = state.shouldFilterThreads
+            when (threadListViewModel.canHomeserverUseThreading()) {
+                true -> menu.findItem(R.id.menu_thread_list_filter).isVisible = true
+                false -> menu.findItem(R.id.menu_thread_list_filter).isVisible = !state.rootThreadEventList.invoke().isNullOrEmpty()
+            }
         }
     }
 
@@ -80,8 +113,19 @@ class ThreadListFragment @Inject constructor(
         super.onViewCreated(view, savedInstanceState)
         initToolbar()
         initTextConstants()
-        views.threadListRecyclerView.configureWith(threadListController, TimelineItemAnimator(), hasFixedSize = false)
-        threadListController.listener = this
+        initBetaFeedback()
+
+        if (threadListViewModel.canHomeserverUseThreading()) {
+            views.threadListRecyclerView.configureWith(threadListController, TimelineItemAnimator(), hasFixedSize = false)
+            threadListController.listener = this
+
+            threadListViewModel.threadsLivePagedList.observe(viewLifecycleOwner) { threadsList ->
+                threadListController.submitList(threadsList)
+            }
+        } else {
+            views.threadListRecyclerView.configureWith(legacyThreadListController, TimelineItemAnimator(), hasFixedSize = false)
+            legacyThreadListController.listener = this
+        }
     }
 
     override fun onDestroyView() {
@@ -98,12 +142,29 @@ class ThreadListFragment @Inject constructor(
     private fun initTextConstants() {
         views.threadListEmptyNoticeTextView.text = String.format(
                 resources.getString(R.string.thread_list_empty_notice),
-                resources.getString(R.string.reply_in_thread))
+                resources.getString(R.string.reply_in_thread)
+        )
+    }
+
+    private fun initBetaFeedback() {
+        views.threadsFeedBackConstraintLayout.isVisible = resources.getBoolean(R.bool.feature_threads_beta_feedback_enabled)
+        views.threadFeedbackDivider.isVisible = resources.getBoolean(R.bool.feature_threads_beta_feedback_enabled)
+        views.threadsFeedBackConstraintLayout.debouncedClicks {
+            bugReporter.openBugReportScreen(requireActivity(), reportType = ReportType.THREADS_BETA_FEEDBACK)
+        }
     }
 
     override fun invalidate() = withState(threadListViewModel) { state ->
+        invalidateOptionsMenu()
         renderEmptyStateIfNeeded(state)
-        threadListController.update(state)
+        if (!threadListViewModel.canHomeserverUseThreading()) {
+            legacyThreadListController.update(state)
+        }
+        renderLoaderIfNeeded(state)
+    }
+
+    private fun renderLoaderIfNeeded(state: ThreadListViewState) {
+        views.threadListProgressBar.isVisible = state.isLoading
     }
 
     private fun renderToolbar() {
@@ -117,27 +178,29 @@ class ThreadListFragment @Inject constructor(
 
     override fun onThreadSummaryClicked(threadSummary: ThreadSummary) {
         val roomThreadDetailArgs = ThreadTimelineArgs(
-                roomId = threadSummary.roomId,
-                displayName = threadSummary.rootThreadSenderInfo.displayName,
-                avatarUrl = threadSummary.rootThreadSenderInfo.avatarUrl,
+                roomId = threadListArgs.roomId,
+                displayName = threadListArgs.displayName,
+                avatarUrl = threadListArgs.avatarUrl,
                 roomEncryptionTrustLevel = null,
-                rootThreadEventId = threadSummary.rootEventId)
+                rootThreadEventId = threadSummary.rootEventId
+        )
         (activity as? ThreadsActivity)?.navigateToThreadTimeline(roomThreadDetailArgs)
     }
 
     override fun onThreadListClicked(timelineEvent: TimelineEvent) {
         val threadTimelineArgs = ThreadTimelineArgs(
-                roomId = timelineEvent.roomId,
-                displayName = timelineEvent.senderInfo.displayName,
-                avatarUrl = timelineEvent.senderInfo.avatarUrl,
+                roomId = threadListArgs.roomId,
+                displayName = threadListArgs.displayName,
+                avatarUrl = threadListArgs.avatarUrl,
                 roomEncryptionTrustLevel = null,
-                rootThreadEventId = timelineEvent.eventId)
+                rootThreadEventId = timelineEvent.eventId
+        )
         (activity as? ThreadsActivity)?.navigateToThreadTimeline(threadTimelineArgs)
     }
 
     private fun renderEmptyStateIfNeeded(state: ThreadListViewState) {
         when (threadListViewModel.canHomeserverUseThreading()) {
-            true  -> views.threadListEmptyConstraintLayout.isVisible = state.threadSummaryList.invoke().isNullOrEmpty()
+            true -> views.threadListEmptyConstraintLayout.isVisible = false
             false -> views.threadListEmptyConstraintLayout.isVisible = state.rootThreadEventList.invoke().isNullOrEmpty()
         }
     }

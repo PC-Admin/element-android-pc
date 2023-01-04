@@ -24,11 +24,12 @@ import android.graphics.drawable.Drawable
 import android.util.TypedValue
 import androidx.annotation.AttrRes
 import androidx.annotation.ColorInt
+import androidx.annotation.StyleRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.drawable.DrawableCompat
+import androidx.preference.PreferenceManager
 import im.vector.app.R
-import im.vector.app.core.di.DefaultSharedPreferences
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicReference
 
@@ -76,7 +77,7 @@ object ThemeUtils {
     }
 
     /**
-     * Provides the selected application theme
+     * Provides the selected application theme.
      *
      * @param context the context
      * @return the selected application theme
@@ -84,7 +85,7 @@ object ThemeUtils {
     fun getApplicationTheme(context: Context): String {
         val currentTheme = this.currentTheme.get()
         return if (currentTheme == null) {
-            val prefs = DefaultSharedPreferences.getInstance(context)
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
             var themeFromPref = prefs.getString(APPLICATION_THEME_KEY, DEFAULT_THEME) ?: DEFAULT_THEME
             if (themeFromPref == "status") {
                 // Migrate to the default theme
@@ -106,44 +107,44 @@ object ThemeUtils {
     }
 
     /**
-     * Update the application theme
+     * Update the application theme.
      *
+     * @param context the Android context
      * @param aTheme the new theme
      */
     fun setApplicationTheme(context: Context, aTheme: String) {
         currentTheme.set(aTheme)
-        context.setTheme(
-                when (aTheme) {
-                    SYSTEM_THEME_VALUE -> if (isSystemDarkTheme(context.resources)) R.style.Theme_Vector_Dark else R.style.Theme_Vector_Light
-                    THEME_DARK_VALUE   -> R.style.Theme_Vector_Dark
-                    THEME_BLACK_VALUE  -> R.style.Theme_Vector_Black
-                    else               -> R.style.Theme_Vector_Light
-                }
-        )
+        context.setTheme(themeToRes(context, aTheme))
 
         // Clear the cache
         mColorByAttr.clear()
     }
 
+    @StyleRes
+    fun getApplicationThemeRes(context: Context) =
+            themeToRes(context, currentTheme.get())
+
     /**
-     * Set the activity theme according to the selected one.
+     * Set the activity theme according to the selected one. Default is Light, so if this is the current
+     * theme, the theme is not changed.
      *
      * @param activity the activity
+     * @param otherThemes themes to apply for dark and black theme
      */
     fun setActivityTheme(activity: Activity, otherThemes: ActivityOtherThemes) {
         when (getApplicationTheme(activity)) {
             SYSTEM_THEME_VALUE -> if (isSystemDarkTheme(activity.resources)) activity.setTheme(otherThemes.dark)
-            THEME_DARK_VALUE   -> activity.setTheme(otherThemes.dark)
-            THEME_BLACK_VALUE  -> activity.setTheme(otherThemes.black)
+            THEME_DARK_VALUE -> activity.setTheme(otherThemes.dark)
+            THEME_BLACK_VALUE -> activity.setTheme(otherThemes.black)
         }
 
         mColorByAttr.clear()
     }
 
     /**
-     * Translates color attributes to colors
+     * Translates color attributes to colors.
      *
-     * @param c              Context
+     * @param c Context
      * @param colorAttribute Color Attribute
      * @return Requested Color
      */
@@ -173,10 +174,10 @@ object ThemeUtils {
     }
 
     /**
-     * Tint the drawable with a theme attribute
+     * Tint the drawable with a theme attribute.
      *
-     * @param context   the context
-     * @param drawable  the drawable to tint
+     * @param context the context
+     * @param drawable the drawable to tint
      * @param attribute the theme color
      * @return the tinted drawable
      */
@@ -185,10 +186,10 @@ object ThemeUtils {
     }
 
     /**
-     * Tint the drawable with a color integer
+     * Tint the drawable with a color integer.
      *
      * @param drawable the drawable to tint
-     * @param color    the color
+     * @param color the color
      * @return the tinted drawable
      */
     fun tintDrawableWithColor(drawable: Drawable, @ColorInt color: Int): Drawable {
@@ -197,4 +198,13 @@ object ThemeUtils {
         DrawableCompat.setTint(tinted, color)
         return tinted
     }
+
+    @StyleRes
+    private fun themeToRes(context: Context, theme: String): Int =
+            when (theme) {
+                SYSTEM_THEME_VALUE -> if (isSystemDarkTheme(context.resources)) R.style.Theme_Vector_Dark else R.style.Theme_Vector_Light
+                THEME_DARK_VALUE -> R.style.Theme_Vector_Dark
+                THEME_BLACK_VALUE -> R.style.Theme_Vector_Black
+                else -> R.style.Theme_Vector_Light
+            }
 }

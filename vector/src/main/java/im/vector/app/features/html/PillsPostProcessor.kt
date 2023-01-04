@@ -26,16 +26,20 @@ import im.vector.app.core.di.ActiveSessionHolder
 import im.vector.app.core.glide.GlideApp
 import im.vector.app.features.home.AvatarRenderer
 import io.noties.markwon.core.spans.LinkSpan
+import org.matrix.android.sdk.api.session.getRoomSummary
+import org.matrix.android.sdk.api.session.getUserOrDefault
 import org.matrix.android.sdk.api.session.permalinks.PermalinkData
 import org.matrix.android.sdk.api.session.permalinks.PermalinkParser
 import org.matrix.android.sdk.api.session.room.model.RoomSummary
 import org.matrix.android.sdk.api.util.MatrixItem
 import org.matrix.android.sdk.api.util.toMatrixItem
 
-class PillsPostProcessor @AssistedInject constructor(@Assisted private val roomId: String?,
-                                                     private val context: Context,
-                                                     private val avatarRenderer: AvatarRenderer,
-                                                     private val sessionHolder: ActiveSessionHolder) :
+class PillsPostProcessor @AssistedInject constructor(
+        @Assisted private val roomId: String?,
+        private val context: Context,
+        private val avatarRenderer: AvatarRenderer,
+        private val sessionHolder: ActiveSessionHolder
+) :
         EventHtmlRenderer.PostProcessor {
 
     /* ==========================================================================================
@@ -79,6 +83,20 @@ class PillsPostProcessor @AssistedInject constructor(@Assisted private val roomI
             val pillSpan = linkSpan.createPillSpan(roomId) ?: return@forEach
             val startSpan = renderedText.getSpanStart(linkSpan)
             val endSpan = renderedText.getSpanEnd(linkSpan)
+            // GlideImagesPlugin causes duplicated pills if we have a nested spans in the pill span,
+            // such as images or italic text.
+            // Accordingly, it's better to remove all spans that are contained in this span before rendering.
+            renderedText.getSpans(startSpan, endSpan, Any::class.java).forEach remove@{
+                if (it !is LinkSpan) {
+                    // Make sure to only remove spans that are contained in this link, and not are bigger than this link, e.g. like reply-blocks
+                    val start = renderedText.getSpanStart(it)
+                    if (start < startSpan) return@remove
+                    val end = renderedText.getSpanEnd(it)
+                    if (end > endSpan) return@remove
+
+                    renderedText.removeSpan(it)
+                }
+            }
             addPillSpan(renderedText, pillSpan, startSpan, endSpan)
         }
     }
@@ -88,19 +106,18 @@ class PillsPostProcessor @AssistedInject constructor(@Assisted private val roomI
 
     private fun LinkSpan.createPillSpan(roomId: String?): PillImageSpan? {
         val matrixItem = when (val permalinkData = PermalinkParser.parse(url)) {
-            is PermalinkData.UserLink  -> permalinkData.toMatrixItem(roomId)
-            is PermalinkData.RoomLink  -> permalinkData.toMatrixItem()
-            is PermalinkData.GroupLink -> permalinkData.toMatrixItem()
-            else                       -> null
+            is PermalinkData.UserLink -> permalinkData.toMatrixItem(roomId)
+            is PermalinkData.RoomLink -> permalinkData.toMatrixItem()
+            else -> null
         } ?: return null
         return createPillImageSpan(matrixItem)
     }
 
     private fun PermalinkData.UserLink.toMatrixItem(roomId: String?): MatrixItem? =
             if (roomId == null) {
-                sessionHolder.getSafeActiveSession()?.getUser(userId)?.toMatrixItem()
+                sessionHolder.getSafeActiveSession()?.getUserOrDefault(userId)?.toMatrixItem()
             } else {
-                sessionHolder.getSafeActiveSession()?.getRoomMember(userId, roomId)?.toMatrixItem()
+                sessionHolder.getSafeActiveSession()?.roomService()?.getRoomMember(userId, roomId)?.toMatrixItem()
             }
 
     private fun PermalinkData.RoomLink.toMatrixItem(): MatrixItem? =
@@ -108,15 +125,10 @@ class PillsPostProcessor @AssistedInject constructor(@Assisted private val roomI
                 val room: RoomSummary? = sessionHolder.getSafeActiveSession()?.getRoomSummary(roomIdOrAlias)
                 when {
                     isRoomAlias -> MatrixItem.RoomAliasItem(roomIdOrAlias, room?.displayName, room?.avatarUrl)
-                    else        -> MatrixItem.RoomItem(roomIdOrAlias, room?.displayName, room?.avatarUrl)
+                    else -> MatrixItem.RoomItem(roomIdOrAlias, room?.displayName, room?.avatarUrl)
                 }
             } else {
                 // Exclude event link (used in reply events, we do not want to pill the "in reply to")
                 null
             }
-
-    private fun PermalinkData.GroupLink.toMatrixItem(): MatrixItem? {
-        val group = sessionHolder.getSafeActiveSession()?.getGroupSummary(groupId)
-        return MatrixItem.GroupItem(groupId, group?.displayName, group?.avatarUrl)
-    }
 }

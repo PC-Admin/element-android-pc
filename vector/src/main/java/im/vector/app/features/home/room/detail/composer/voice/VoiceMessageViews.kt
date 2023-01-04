@@ -27,7 +27,6 @@ import androidx.core.view.doOnLayout
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
-import com.visualizer.amplitude.AudioRecordView
 import im.vector.app.R
 import im.vector.app.core.extensions.setAttributeBackground
 import im.vector.app.core.extensions.setAttributeTintedBackground
@@ -36,7 +35,9 @@ import im.vector.app.core.utils.DimensionConverter
 import im.vector.app.databinding.ViewVoiceMessageRecorderBinding
 import im.vector.app.features.home.room.detail.composer.voice.VoiceMessageRecorderView.DraggingState
 import im.vector.app.features.home.room.detail.composer.voice.VoiceMessageRecorderView.RecordingUiState
-import im.vector.app.features.home.room.detail.timeline.helper.VoiceMessagePlaybackTracker
+import im.vector.app.features.home.room.detail.timeline.helper.AudioMessagePlaybackTracker
+import im.vector.app.features.themes.ThemeUtils
+import im.vector.app.features.voice.AudioWaveformView
 
 class VoiceMessageViews(
         private val resources: Resources,
@@ -59,8 +60,21 @@ class VoiceMessageViews(
             actions.onDeleteVoiceMessage()
         }
 
-        views.voicePlaybackWaveform.setOnClickListener {
-            actions.onWaveformClicked()
+        views.voicePlaybackWaveform.setOnTouchListener { view, motionEvent ->
+            when (motionEvent.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    actions.onWaveformClicked()
+                }
+                MotionEvent.ACTION_UP -> {
+                    val percentage = getTouchedPositionPercentage(motionEvent, view)
+                    actions.onVoiceWaveformTouchedUp(percentage)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val percentage = getTouchedPositionPercentage(motionEvent, view)
+                    actions.onVoiceWaveformMoved(percentage)
+                }
+            }
+            true
         }
 
         views.voicePlaybackControlButton.setOnClickListener {
@@ -68,6 +82,8 @@ class VoiceMessageViews(
         }
         observeMicButton(actions)
     }
+
+    private fun getTouchedPositionPercentage(motionEvent: MotionEvent, view: View) = (motionEvent.x / view.width).coerceIn(0f, 1f)
 
     @SuppressLint("ClickableViewAccessibility")
     private fun observeMicButton(actions: Actions) {
@@ -79,7 +95,7 @@ class VoiceMessageViews(
                     actions.onRequestRecording()
                     true
                 }
-                MotionEvent.ACTION_UP   -> {
+                MotionEvent.ACTION_UP -> {
                     actions.onMicButtonReleased()
                     true
                 }
@@ -87,7 +103,7 @@ class VoiceMessageViews(
                     actions.onMicButtonDrag { currentState -> draggableStateProcessor.process(event, currentState) }
                     true
                 }
-                else                    -> false
+                else -> false
             }
         }
     }
@@ -131,7 +147,8 @@ class VoiceMessageViews(
     }
 
     fun showRecordingViews() {
-        views.voiceMessageMicButton.setImageResource(R.drawable.ic_voice_mic_recording)
+        views.voiceMessageBackgroundView.isVisible = true
+        views.voiceMessageMicButton.setImageResource(R.drawable.ic_composer_rich_mic_pressed)
         views.voiceMessageMicButton.setAttributeTintedBackground(R.drawable.circle_with_halo, R.attr.colorPrimary)
         views.voiceMessageMicButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
             setMargins(0, 0, 0, 0)
@@ -156,6 +173,7 @@ class VoiceMessageViews(
 
     fun hideRecordingViews(recordingState: RecordingUiState) {
         // We need to animate the lock image first
+        views.voiceMessageBackgroundView.isVisible = false
         if (recordingState !is RecordingUiState.Locked) {
             views.voiceMessageLockImage.isVisible = false
             views.voiceMessageLockImage.animate().translationY(0f).start()
@@ -244,7 +262,7 @@ class VoiceMessageViews(
 
     fun resetMicButtonUi() {
         views.voiceMessageMicButton.isVisible = true
-        views.voiceMessageMicButton.setImageResource(R.drawable.ic_voice_mic)
+        views.voiceMessageMicButton.setImageResource(R.drawable.ic_microphone)
         views.voiceMessageMicButton.setAttributeBackground(android.R.attr.selectableItemBackgroundBorderless)
         views.voiceMessageMicButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
             if (rtlXMultiplier == -1) {
@@ -262,6 +280,7 @@ class VoiceMessageViews(
 
     fun showDraftViews() {
         hideRecordingViews(RecordingUiState.Idle)
+        views.voiceMessageBackgroundView.isVisible = true
         views.voiceMessageMicButton.isVisible = false
         views.voiceMessageSendButton.isVisible = true
         views.voiceMessagePlaybackLayout.isVisible = true
@@ -272,6 +291,7 @@ class VoiceMessageViews(
 
     fun showRecordingLockedViews(recordingState: RecordingUiState) {
         hideRecordingViews(recordingState)
+        views.voiceMessageBackgroundView.isVisible = true
         views.voiceMessagePlaybackLayout.isVisible = true
         views.voiceMessagePlaybackTimerIndicator.isVisible = true
         views.voicePlaybackControlButton.isVisible = false
@@ -284,19 +304,23 @@ class VoiceMessageViews(
         hideRecordingViews(RecordingUiState.Idle)
         views.voiceMessageMicButton.isVisible = true
         views.voiceMessageSendButton.isVisible = false
-        views.voicePlaybackWaveform.post { views.voicePlaybackWaveform.recreate() }
+        views.voicePlaybackWaveform.post { views.voicePlaybackWaveform.clear() }
     }
 
-    fun renderPlaying(state: VoiceMessagePlaybackTracker.Listener.State.Playing) {
+    fun renderPlaying(state: AudioMessagePlaybackTracker.Listener.State.Playing) {
         views.voicePlaybackControlButton.setImageResource(R.drawable.ic_play_pause_pause)
         views.voicePlaybackControlButton.contentDescription = resources.getString(R.string.a11y_pause_voice_message)
         val formattedTimerText = DateUtils.formatElapsedTime((state.playbackTime / 1000).toLong())
         views.voicePlaybackTime.text = formattedTimerText
+        val waveformColorIdle = ThemeUtils.getColor(views.voicePlaybackWaveform.context, R.attr.vctr_content_quaternary)
+        val waveformColorPlayed = ThemeUtils.getColor(views.voicePlaybackWaveform.context, R.attr.vctr_content_secondary)
+        views.voicePlaybackWaveform.updateColors(state.percentage, waveformColorPlayed, waveformColorIdle)
     }
 
     fun renderIdle() {
         views.voicePlaybackControlButton.setImageResource(R.drawable.ic_play_pause_play)
         views.voicePlaybackControlButton.contentDescription = resources.getString(R.string.a11y_play_voice_message)
+        views.voicePlaybackWaveform.summarize()
     }
 
     fun renderToast(message: String) {
@@ -325,10 +349,11 @@ class VoiceMessageViews(
         }
     }
 
-    fun renderRecordingWaveform(amplitudeList: Array<Int>) {
+    fun renderRecordingWaveform(amplitudeList: List<Int>) {
         views.voicePlaybackWaveform.doOnLayout { waveFormView ->
-            amplitudeList.iterator().forEach {
-                (waveFormView as AudioRecordView).update(it)
+            val waveformColor = ThemeUtils.getColor(waveFormView.context, R.attr.vctr_content_quaternary)
+            amplitudeList.forEach {
+                (waveFormView as AudioWaveformView).add(AudioWaveformView.FFT(it.toFloat(), waveformColor))
             }
         }
     }
@@ -349,5 +374,7 @@ class VoiceMessageViews(
         fun onDeleteVoiceMessage()
         fun onWaveformClicked()
         fun onVoicePlaybackButtonClicked()
+        fun onVoiceWaveformTouchedUp(percentage: Float)
+        fun onVoiceWaveformMoved(percentage: Float)
     }
 }

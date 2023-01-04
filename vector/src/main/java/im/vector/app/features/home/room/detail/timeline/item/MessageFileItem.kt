@@ -34,7 +34,7 @@ import im.vector.app.features.home.room.detail.timeline.helper.ContentUploadStat
 import im.vector.app.features.home.room.detail.timeline.style.TimelineMessageLayout
 import im.vector.app.features.themes.ThemeUtils
 
-@EpoxyModelClass(layout = R.layout.item_timeline_event_base)
+@EpoxyModelClass
 abstract class MessageFileItem : AbsMessageItem<MessageFileItem.Holder>() {
 
     @EpoxyAttribute
@@ -46,9 +46,6 @@ abstract class MessageFileItem : AbsMessageItem<MessageFileItem.Holder>() {
     @EpoxyAttribute
     @DrawableRes
     var iconRes: Int = 0
-
-//    @EpoxyAttribute(EpoxyAttribute.Option.DoNotHash)
-//    var clickListener: ClickListener? = null
 
     @EpoxyAttribute
     var izLocalFile = false
@@ -65,13 +62,16 @@ abstract class MessageFileItem : AbsMessageItem<MessageFileItem.Holder>() {
     override fun bind(holder: Holder) {
         super.bind(holder)
         renderSendState(holder.fileLayout, holder.filenameView)
+
         if (!attributes.informationData.sendState.hasFailed()) {
             contentUploadStateTrackerBinder.bind(attributes.informationData.eventId, izLocalFile, holder.progressLayout)
         } else {
             holder.fileImageView.setImageResource(R.drawable.ic_cross)
             holder.progressLayout.isVisible = false
         }
+
         holder.filenameView.text = filename
+
         if (attributes.informationData.sendState.isSending()) {
             holder.fileImageView.setImageResource(iconRes)
         } else {
@@ -83,7 +83,7 @@ abstract class MessageFileItem : AbsMessageItem<MessageFileItem.Holder>() {
                 holder.fileImageView.setImageResource(R.drawable.ic_download)
             }
         }
-//        holder.view.setOnClickListener(clickListener)
+
         val backgroundTint = if (attributes.informationData.messageLayout is TimelineMessageLayout.Bubble) {
             Color.TRANSPARENT
         } else {
@@ -116,6 +116,6 @@ abstract class MessageFileItem : AbsMessageItem<MessageFileItem.Holder>() {
     }
 
     companion object {
-        private const val STUB_ID = R.id.messageContentFileStub
+        private val STUB_ID = R.id.messageContentFileStub
     }
 }

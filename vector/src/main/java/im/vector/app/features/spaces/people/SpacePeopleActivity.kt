@@ -24,12 +24,15 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.airbnb.mvrx.Mavericks
 import dagger.hilt.android.AndroidEntryPoint
+import im.vector.app.R
 import im.vector.app.core.extensions.hideKeyboard
 import im.vector.app.core.extensions.replaceFragment
 import im.vector.app.core.platform.GenericIdArgs
 import im.vector.app.core.platform.VectorBaseActivity
 import im.vector.app.databinding.ActivitySimpleLoadingBinding
+import im.vector.app.features.analytics.plan.ViewRoom
 import im.vector.app.features.spaces.share.ShareSpaceBottomSheet
+import im.vector.lib.core.utils.compat.getParcelableExtraCompat
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -61,7 +64,7 @@ class SpacePeopleActivity : VectorBaseActivity<ActivitySimpleLoadingBinding>() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val args = intent?.getParcelableExtra<GenericIdArgs>(Mavericks.KEY_ARG)
+        val args = intent?.getParcelableExtraCompat<GenericIdArgs>(Mavericks.KEY_ARG)
         if (isFirstCreation()) {
             replaceFragment(
                     views.simpleFragmentContainer,
@@ -75,11 +78,11 @@ class SpacePeopleActivity : VectorBaseActivity<ActivitySimpleLoadingBinding>() {
                 .stream()
                 .onEach { sharedAction ->
                     when (sharedAction) {
-                        SpacePeopleSharedAction.Dismiss             -> finish()
-                        is SpacePeopleSharedAction.NavigateToRoom   -> navigateToRooms(sharedAction)
-                        SpacePeopleSharedAction.HideModalLoading    -> hideWaitingView()
-                        SpacePeopleSharedAction.ShowModalLoading    -> {
-                            showWaitingView()
+                        SpacePeopleSharedAction.Dismiss -> finish()
+                        is SpacePeopleSharedAction.NavigateToRoom -> navigateToRooms(sharedAction)
+                        SpacePeopleSharedAction.HideModalLoading -> hideWaitingView()
+                        SpacePeopleSharedAction.ShowModalLoading -> {
+                            showWaitingView(getString(R.string.please_wait))
                         }
                         is SpacePeopleSharedAction.NavigateToInvite -> {
                             ShareSpaceBottomSheet.show(supportFragmentManager, sharedAction.spaceId)
@@ -89,7 +92,11 @@ class SpacePeopleActivity : VectorBaseActivity<ActivitySimpleLoadingBinding>() {
     }
 
     private fun navigateToRooms(action: SpacePeopleSharedAction.NavigateToRoom) {
-        navigator.openRoom(this, action.roomId)
+        navigator.openRoom(
+                context = this,
+                roomId = action.roomId,
+                trigger = ViewRoom.Trigger.MobileSpaceMembers
+        )
         finish()
     }
 

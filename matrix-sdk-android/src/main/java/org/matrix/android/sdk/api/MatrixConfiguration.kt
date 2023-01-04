@@ -17,7 +17,12 @@
 package org.matrix.android.sdk.api
 
 import okhttp3.ConnectionSpec
+import okhttp3.Interceptor
 import org.matrix.android.sdk.api.crypto.MXCryptoConfig
+import org.matrix.android.sdk.api.metrics.MetricPlugin
+import org.matrix.android.sdk.api.provider.CustomEventTypesProvider
+import org.matrix.android.sdk.api.provider.MatrixItemDisplayNameFallbackProvider
+import org.matrix.android.sdk.api.provider.RoomDisplayNameFallbackProvider
 import java.net.Proxy
 
 data class MatrixConfiguration(
@@ -46,7 +51,7 @@ data class MatrixConfiguration(
          */
         val proxy: Proxy? = null,
         /**
-         * TLS versions and cipher suites limitation for unauthenticated requests
+         * TLS versions and cipher suites limitation for unauthenticated requests.
          */
         val connectionSpec: ConnectionSpec = ConnectionSpec.RESTRICTED_TLS,
         /**
@@ -62,20 +67,23 @@ data class MatrixConfiguration(
          */
         val roomDisplayNameFallbackProvider: RoomDisplayNameFallbackProvider,
         /**
-         * True to enable presence information sync (if available). False to disable regardless of server setting.
+         * Thread messages default enable/disabled value.
          */
-        val presenceSyncEnabled: Boolean = true,
+        val threadMessagesEnabledDefault: Boolean = true,
         /**
-         * Thread messages default enable/disabled value
+         * List of network interceptors, they will be added when building an OkHttp client.
          */
-        val threadMessagesEnabledDefault: Boolean = false,
-) {
-
-    /**
-     * Can be implemented by your Application class.
-     */
-    @Deprecated("Use Matrix.createInstance and manage the instance manually instead of Matrix.getInstance")
-    interface Provider {
-        fun providesMatrixConfiguration(): MatrixConfiguration
-    }
-}
+        val networkInterceptors: List<Interceptor> = emptyList(),
+        /**
+         * Sync configuration.
+         */
+        val syncConfig: SyncConfig = SyncConfig(),
+        /**
+         * Metrics plugin that can be used to capture metrics from matrix-sdk-android.
+         */
+        val metricPlugins: List<MetricPlugin> = emptyList(),
+        /**
+         * CustomEventTypesProvider to provide custom event types to the sdk which should be processed with internal events.
+         */
+        val customEventTypesProvider: CustomEventTypesProvider? = null,
+)

@@ -20,13 +20,13 @@ import android.net.Uri
 import android.view.View
 import im.vector.app.core.platform.VectorViewEvents
 import im.vector.app.features.call.webrtc.WebRtcCall
+import org.matrix.android.sdk.api.session.events.model.content.WithHeldCode
 import org.matrix.android.sdk.api.session.widgets.model.Widget
 import org.matrix.android.sdk.api.util.MatrixItem
-import org.matrix.android.sdk.internal.crypto.model.event.WithHeldCode
 import java.io.File
 
 /**
- * Transient events for RoomDetail
+ * Transient events for RoomDetail.
  */
 sealed class RoomDetailViewEvents : VectorViewEvents {
     data class Failure(val throwable: Throwable, val showInDialog: Boolean = false) : RoomDetailViewEvents()
@@ -51,7 +51,7 @@ sealed class RoomDetailViewEvents : VectorViewEvents {
     object OpenRoomProfile : RoomDetailViewEvents()
     data class ShowRoomAvatarFullScreen(val matrixItem: MatrixItem?, val view: View?) : RoomDetailViewEvents()
 
-    object ShowWaitingView : RoomDetailViewEvents()
+    data class ShowWaitingView(val text: String? = null) : RoomDetailViewEvents()
     object HideWaitingView : RoomDetailViewEvents()
 
     data class DownloadFileState(
@@ -71,15 +71,20 @@ sealed class RoomDetailViewEvents : VectorViewEvents {
 
     object DisplayEnableIntegrationsWarning : RoomDetailViewEvents()
 
+    object DisplayPromptToStopVoiceBroadcast : RoomDetailViewEvents()
+
     data class OpenStickerPicker(val widget: Widget) : RoomDetailViewEvents()
 
     object OpenIntegrationManager : RoomDetailViewEvents()
     object OpenActiveWidgetBottomSheet : RoomDetailViewEvents()
-    data class RequestNativeWidgetPermission(val widget: Widget,
-                                             val domain: String,
-                                             val grantedEvents: RoomDetailViewEvents) : RoomDetailViewEvents()
+    data class RequestNativeWidgetPermission(
+            val widget: Widget,
+            val domain: String,
+            val grantedEvents: RoomDetailViewEvents
+    ) : RoomDetailViewEvents()
 
     data class StartChatEffect(val type: ChatEffect) : RoomDetailViewEvents()
     object StopChatEffects : RoomDetailViewEvents()
     object RoomReplacementStarted : RoomDetailViewEvents()
+    object OpenElementCallWidget : RoomDetailViewEvents()
 }

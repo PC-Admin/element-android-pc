@@ -24,10 +24,11 @@ import dagger.assisted.AssistedInject
 import im.vector.app.R
 import im.vector.app.features.autocomplete.AutocompleteClickListener
 import im.vector.app.features.autocomplete.RecyclerViewPresenter
-import org.matrix.android.sdk.api.pushrules.SenderNotificationPermissionCondition
 import org.matrix.android.sdk.api.query.QueryStringValue
 import org.matrix.android.sdk.api.session.Session
 import org.matrix.android.sdk.api.session.events.model.Event
+import org.matrix.android.sdk.api.session.getRoom
+import org.matrix.android.sdk.api.session.pushrules.SenderNotificationPermissionCondition
 import org.matrix.android.sdk.api.session.room.members.RoomMemberQueryParams
 import org.matrix.android.sdk.api.session.room.members.roomMemberQueryParams
 import org.matrix.android.sdk.api.session.room.model.Membership
@@ -35,10 +36,11 @@ import org.matrix.android.sdk.api.session.room.model.PowerLevelsContent
 import org.matrix.android.sdk.api.session.room.model.RoomMemberSummary
 import org.matrix.android.sdk.api.util.MatrixItem
 
-class AutocompleteMemberPresenter @AssistedInject constructor(context: Context,
-                                                              @Assisted val roomId: String,
-                                                              private val session: Session,
-                                                              private val controller: AutocompleteMemberController
+class AutocompleteMemberPresenter @AssistedInject constructor(
+        context: Context,
+        @Assisted val roomId: String,
+        private val session: Session,
+        private val controller: AutocompleteMemberController
 ) : RecyclerViewPresenter<AutocompleteMemberItem>(context), AutocompleteClickListener<AutocompleteMemberItem> {
 
     /* ==========================================================================================
@@ -126,7 +128,8 @@ class AutocompleteMemberPresenter @AssistedInject constructor(context: Context,
             )
 
     private fun createMemberItems(queryParams: RoomMemberQueryParams) =
-            room.getRoomMembers(queryParams)
+            room.membershipService()
+                    .getRoomMembers(queryParams)
                     .asSequence()
                     .sortedBy { it.displayName }
                     .disambiguate()
@@ -142,12 +145,17 @@ class AutocompleteMemberPresenter @AssistedInject constructor(context: Context,
     private fun createEveryoneItem(query: CharSequence?) =
             room.roomSummary()
                     ?.takeIf { canNotifyEveryone() }
-                    ?.takeIf { query.isNullOrBlank() || MatrixItem.NOTIFY_EVERYONE.startsWith("@$query") }
+                    ?.takeIf {
+                        query.isNullOrBlank() ||
+                                SUGGEST_ROOM_KEYWORDS.any {
+                                    it.startsWith("@$query")
+                                }
+                    }
                     ?.let {
                         AutocompleteMemberItem.Everyone(it)
                     }
 
-    private fun canNotifyEveryone() = session.resolveSenderNotificationPermissionCondition(
+    private fun canNotifyEveryone() = session.pushRuleService().resolveSenderNotificationPermissionCondition(
             Event(
                     senderId = session.myUserId,
                     roomId = roomId
@@ -162,6 +170,7 @@ class AutocompleteMemberPresenter @AssistedInject constructor(context: Context,
     companion object {
         private const val ID_HEADER_MEMBERS = "ID_HEADER_MEMBERS"
         private const val ID_HEADER_EVERYONE = "ID_HEADER_EVERYONE"
+        private val SUGGEST_ROOM_KEYWORDS = setOf(MatrixItem.NOTIFY_EVERYONE, "@channel", "@everyone", "@here")
     }
 }
 

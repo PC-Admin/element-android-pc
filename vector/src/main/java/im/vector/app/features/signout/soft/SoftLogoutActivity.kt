@@ -25,7 +25,6 @@ import com.airbnb.mvrx.viewModel
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.R
-import im.vector.app.core.error.ErrorFormatter
 import im.vector.app.core.extensions.replaceFragment
 import im.vector.app.features.MainActivity
 import im.vector.app.features.MainActivityArgs
@@ -36,8 +35,8 @@ import timber.log.Timber
 import javax.inject.Inject
 
 /**
- * In this screen, the user is viewing a message informing that he has been logged out
- * Extends LoginActivity to get the login with SSO and forget password functionality for (nearly) free
+ * In this screen, the user is viewing a message informing that he has been logged out.
+ * Extends LoginActivity to get the login with SSO and forget password functionality for (nearly) free.
  */
 @AndroidEntryPoint
 class SoftLogoutActivity : LoginActivity() {
@@ -45,7 +44,6 @@ class SoftLogoutActivity : LoginActivity() {
     private val softLogoutViewModel: SoftLogoutViewModel by viewModel()
 
     @Inject lateinit var session: Session
-    @Inject lateinit var errorFormatter: ErrorFormatter
 
     override fun initUiAndData() {
         super.initUiAndData()
@@ -59,20 +57,22 @@ class SoftLogoutActivity : LoginActivity() {
 
     private fun handleSoftLogoutViewEvents(softLogoutViewEvents: SoftLogoutViewEvents) {
         when (softLogoutViewEvents) {
-            is SoftLogoutViewEvents.Failure          ->
+            is SoftLogoutViewEvents.Failure ->
                 showError(errorFormatter.toHumanReadable(softLogoutViewEvents.throwable))
             is SoftLogoutViewEvents.ErrorNotSameUser -> {
                 // Pop the backstack
                 supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
 
                 // And inform the user
-                showError(getString(
-                        R.string.soft_logout_sso_not_same_user_error,
-                        softLogoutViewEvents.currentUserId,
-                        softLogoutViewEvents.newUserId)
+                showError(
+                        getString(
+                                R.string.soft_logout_sso_not_same_user_error,
+                                softLogoutViewEvents.currentUserId,
+                                softLogoutViewEvents.newUserId
+                        )
                 )
             }
-            is SoftLogoutViewEvents.ClearData        -> {
+            is SoftLogoutViewEvents.ClearData -> {
                 MainActivity.restartApp(this, MainActivityArgs(clearCredentials = true))
             }
         }

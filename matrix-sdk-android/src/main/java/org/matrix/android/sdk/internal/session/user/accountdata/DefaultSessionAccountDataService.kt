@@ -23,21 +23,22 @@ import org.matrix.android.sdk.api.session.accountdata.UserAccountDataEvent
 import org.matrix.android.sdk.api.session.events.model.Content
 import org.matrix.android.sdk.api.session.room.accountdata.RoomAccountDataEvent
 import org.matrix.android.sdk.api.util.Optional
+import org.matrix.android.sdk.api.util.awaitCallback
 import org.matrix.android.sdk.internal.di.SessionDatabase
 import org.matrix.android.sdk.internal.session.room.accountdata.RoomAccountDataDataSource
 import org.matrix.android.sdk.internal.session.sync.handler.UserAccountDataSyncHandler
 import org.matrix.android.sdk.internal.task.TaskExecutor
 import org.matrix.android.sdk.internal.task.configureWith
-import org.matrix.android.sdk.internal.util.awaitCallback
 import javax.inject.Inject
 
 internal class DefaultSessionAccountDataService @Inject constructor(
         @SessionDatabase private val monarchy: Monarchy,
         private val updateUserAccountDataTask: UpdateUserAccountDataTask,
+        private val deleteUserAccountDataTask: DeleteUserAccountDataTask,
         private val userAccountDataSyncHandler: UserAccountDataSyncHandler,
         private val userAccountDataDataSource: UserAccountDataDataSource,
         private val roomAccountDataDataSource: RoomAccountDataDataSource,
-        private val taskExecutor: TaskExecutor
+        private val taskExecutor: TaskExecutor,
 ) : SessionAccountDataService {
 
     override fun getUserAccountDataEvent(type: String): UserAccountDataEvent? {
@@ -66,9 +67,9 @@ internal class DefaultSessionAccountDataService @Inject constructor(
 
     override suspend fun updateUserAccountData(type: String, content: Content) {
         val params = UpdateUserAccountDataTask.AnyParams(type = type, any = content)
-        awaitCallback<Unit> { callback ->
+        awaitCallback { callback ->
             updateUserAccountDataTask.configureWith(params) {
-                this.retryCount = 5 // TODO: Need to refactor retrying out into a helper method.
+                this.retryCount = 5 // TODO Need to refactor retrying out into a helper method.
                 this.callback = callback
             }
                     .executeBy(taskExecutor)
@@ -77,5 +78,13 @@ internal class DefaultSessionAccountDataService @Inject constructor(
         monarchy.runTransactionSync { realm ->
             userAccountDataSyncHandler.handleGenericAccountData(realm, type, content)
         }
+    }
+
+    override fun getUserAccountDataEventsStartWith(type: String): List<UserAccountDataEvent> {
+        return userAccountDataDataSource.getAccountDataEventsStartWith(type)
+    }
+
+    override suspend fun deleteUserAccountData(type: String) {
+        deleteUserAccountDataTask.execute(DeleteUserAccountDataTask.Params(type))
     }
 }

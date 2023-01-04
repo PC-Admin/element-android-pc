@@ -24,30 +24,31 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import kotlin.system.measureTimeMillis
 
-internal fun <T> CoroutineScope.asyncTransaction(monarchy: Monarchy, transaction: suspend (realm: Realm) -> T) {
+internal fun <T> CoroutineScope.asyncTransaction(monarchy: Monarchy, transaction: (realm: Realm) -> T) {
     asyncTransaction(monarchy.realmConfiguration, transaction)
 }
 
-internal fun <T> CoroutineScope.asyncTransaction(realmConfiguration: RealmConfiguration, transaction: suspend (realm: Realm) -> T) {
+internal fun <T> CoroutineScope.asyncTransaction(realmConfiguration: RealmConfiguration, transaction: (realm: Realm) -> T) {
     launch {
         awaitTransaction(realmConfiguration, transaction)
     }
 }
 
-suspend fun <T> awaitTransaction(config: RealmConfiguration, transaction: suspend (realm: Realm) -> T): T {
+internal suspend fun <T> awaitTransaction(config: RealmConfiguration, transaction: (realm: Realm) -> T): T {
     return withContext(Realm.WRITE_EXECUTOR.asCoroutineDispatcher()) {
         Realm.getInstance(config).use { bgRealm ->
             bgRealm.beginTransaction()
             val result: T
             try {
-                val start = System.currentTimeMillis()
-                result = transaction(bgRealm)
-                if (isActive) {
-                    bgRealm.commitTransaction()
-                    val end = System.currentTimeMillis()
-                    val time = end - start
-                    Timber.v("Execute transaction in $time millis")
+                measureTimeMillis {
+                    result = transaction(bgRealm)
+                    if (isActive) {
+                        bgRealm.commitTransaction()
+                    }
+                }.also {
+                    Timber.v("Execute transaction in $it millis")
                 }
             } finally {
                 if (bgRealm.isInTransaction) {

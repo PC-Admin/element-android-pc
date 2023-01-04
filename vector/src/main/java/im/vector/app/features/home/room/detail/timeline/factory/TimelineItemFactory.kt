@@ -21,22 +21,25 @@ import im.vector.app.core.epoxy.TimelineEmptyItem_
 import im.vector.app.core.epoxy.VectorEpoxyModel
 import im.vector.app.features.analytics.DecryptionFailureTracker
 import im.vector.app.features.home.room.detail.timeline.helper.TimelineEventVisibilityHelper
+import im.vector.app.features.voicebroadcast.VoiceBroadcastConstants
 import org.matrix.android.sdk.api.session.events.model.EventType
 import org.matrix.android.sdk.api.session.room.timeline.TimelineEvent
 import timber.log.Timber
 import javax.inject.Inject
 
-class TimelineItemFactory @Inject constructor(private val messageItemFactory: MessageItemFactory,
-                                              private val encryptedItemFactory: EncryptedItemFactory,
-                                              private val noticeItemFactory: NoticeItemFactory,
-                                              private val defaultItemFactory: DefaultItemFactory,
-                                              private val encryptionItemFactory: EncryptionItemFactory,
-                                              private val roomCreateItemFactory: RoomCreateItemFactory,
-                                              private val widgetItemFactory: WidgetItemFactory,
-                                              private val verificationConclusionItemFactory: VerificationItemFactory,
-                                              private val callItemFactory: CallItemFactory,
-                                              private val decryptionFailureTracker: DecryptionFailureTracker,
-                                              private val timelineEventVisibilityHelper: TimelineEventVisibilityHelper) {
+class TimelineItemFactory @Inject constructor(
+        private val messageItemFactory: MessageItemFactory,
+        private val encryptedItemFactory: EncryptedItemFactory,
+        private val noticeItemFactory: NoticeItemFactory,
+        private val defaultItemFactory: DefaultItemFactory,
+        private val encryptionItemFactory: EncryptionItemFactory,
+        private val roomCreateItemFactory: RoomCreateItemFactory,
+        private val widgetItemFactory: WidgetItemFactory,
+        private val verificationConclusionItemFactory: VerificationItemFactory,
+        private val callItemFactory: CallItemFactory,
+        private val decryptionFailureTracker: DecryptionFailureTracker,
+        private val timelineEventVisibilityHelper: TimelineEventVisibilityHelper,
+) {
 
     /**
      * Reminder: nextEvent is older and prevEvent is newer.
@@ -48,13 +51,15 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                             timelineEvent = event,
                             highlightedEventId = params.highlightedEventId,
                             isFromThreadTimeline = params.isFromThreadTimeline(),
-                            rootThreadEventId = params.rootThreadEventId)) {
+                            rootThreadEventId = params.rootThreadEventId
+                    )) {
                 return buildEmptyItem(
                         event,
                         params.prevEvent,
                         params.highlightedEventId,
                         params.rootThreadEventId,
-                        params.isFromThreadTimeline())
+                        params.isFromThreadTimeline()
+                )
             }
 
             // Manage state event differently, to check validity
@@ -79,12 +84,14 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                         noticeItemFactory.create(params)
                     }
                     EventType.STATE_ROOM_WIDGET_LEGACY,
-                    EventType.STATE_ROOM_WIDGET       -> widgetItemFactory.create(params)
-                    EventType.STATE_ROOM_ENCRYPTION   -> encryptionItemFactory.create(params)
+                    EventType.STATE_ROOM_WIDGET -> widgetItemFactory.create(params)
+                    EventType.STATE_ROOM_ENCRYPTION -> encryptionItemFactory.create(params)
                     // State room create
-                    EventType.STATE_ROOM_CREATE       -> roomCreateItemFactory.create(params)
+                    EventType.STATE_ROOM_CREATE -> roomCreateItemFactory.create(params)
+                    in EventType.STATE_ROOM_BEACON_INFO.values -> messageItemFactory.create(params)
+                    VoiceBroadcastConstants.STATE_ROOM_VOICE_BROADCAST_INFO -> messageItemFactory.create(params)
                     // Unhandled state event types
-                    else                              -> {
+                    else -> {
                         // Should only happen when shouldShowHiddenEvents() settings is ON
                         Timber.v("State event type ${event.root.type} not handled")
                         defaultItemFactory.create(params)
@@ -94,8 +101,8 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                 when (event.root.getClearType()) {
                     // Message itemsX
                     EventType.STICKER,
-                    in EventType.POLL_START,
-                    EventType.MESSAGE               -> messageItemFactory.create(params)
+                    in EventType.POLL_START.values,
+                    EventType.MESSAGE -> messageItemFactory.create(params)
                     EventType.REDACTION,
                     EventType.KEY_VERIFICATION_ACCEPT,
                     EventType.KEY_VERIFICATION_START,
@@ -107,15 +114,22 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                     EventType.CALL_SELECT_ANSWER,
                     EventType.CALL_NEGOTIATE,
                     EventType.REACTION,
-                    in EventType.POLL_RESPONSE,
-                    in EventType.POLL_END           -> noticeItemFactory.create(params)
+                    in EventType.POLL_RESPONSE.values,
+                    in EventType.POLL_END.values -> noticeItemFactory.create(params)
+                    in EventType.BEACON_LOCATION_DATA.values -> {
+                        if (event.root.isRedacted()) {
+                            messageItemFactory.create(params)
+                        } else {
+                            noticeItemFactory.create(params)
+                        }
+                    }
                     // Calls
                     EventType.CALL_INVITE,
                     EventType.CALL_HANGUP,
                     EventType.CALL_REJECT,
-                    EventType.CALL_ANSWER           -> callItemFactory.create(params)
+                    EventType.CALL_ANSWER -> callItemFactory.create(params)
                     // Crypto
-                    EventType.ENCRYPTED             -> {
+                    EventType.ENCRYPTED -> {
                         if (event.root.isRedacted()) {
                             // Redacted event, let the MessageItemFactory handle it
                             messageItemFactory.create(params)
@@ -128,7 +142,7 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                         verificationConclusionItemFactory.create(params)
                     }
                     // Unhandled event types
-                    else                            -> {
+                    else -> {
                         // Should only happen when shouldShowHiddenEvents() settings is ON
                         Timber.v("Type ${event.root.getClearType()} not handled")
                         defaultItemFactory.create(params)
@@ -148,19 +162,23 @@ class TimelineItemFactory @Inject constructor(private val messageItemFactory: Me
                 params.prevEvent,
                 params.highlightedEventId,
                 params.rootThreadEventId,
-                params.isFromThreadTimeline())
+                params.isFromThreadTimeline()
+        )
     }
 
-    private fun buildEmptyItem(timelineEvent: TimelineEvent,
-                               prevEvent: TimelineEvent?,
-                               highlightedEventId: String?,
-                               rootThreadEventId: String?,
-                               isFromThreadTimeline: Boolean): TimelineEmptyItem {
+    private fun buildEmptyItem(
+            timelineEvent: TimelineEvent,
+            prevEvent: TimelineEvent?,
+            highlightedEventId: String?,
+            rootThreadEventId: String?,
+            isFromThreadTimeline: Boolean
+    ): TimelineEmptyItem {
         val isNotBlank = prevEvent == null || timelineEventVisibilityHelper.shouldShowEvent(
                 timelineEvent = prevEvent,
                 highlightedEventId = highlightedEventId,
                 isFromThreadTimeline = isFromThreadTimeline,
-                rootThreadEventId = rootThreadEventId)
+                rootThreadEventId = rootThreadEventId
+        )
         return TimelineEmptyItem_()
                 .id(timelineEvent.localId)
                 .eventId(timelineEvent.eventId)

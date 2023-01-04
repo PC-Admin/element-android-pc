@@ -9,12 +9,6 @@
         app:isPreferenceVisible="@bool/settings_root_general_visible" />
 
     <im.vector.app.core.preference.VectorPreference
-        android:icon="@drawable/ic_settings_root_flair"
-        android:title="@string/settings_flair"
-        app:fragment="im.vector.app.features.settings.VectorSettingsFlairFragment"
-        app:isPreferenceVisible="@bool/false_not_implemented" />
-
-    <im.vector.app.core.preference.VectorPreference
         android:icon="@drawable/ic_settings_root_notification"
         android:title="@string/settings_notifications"
         app:fragment="im.vector.app.features.settings.notifications.VectorSettingsNotificationPreferenceFragment"
@@ -33,12 +27,6 @@
         app:isPreferenceVisible="@bool/settings_root_voice_video_visible" />
 
     <im.vector.app.core.preference.VectorPreference
-        android:icon="@drawable/ic_settings_root_ignored_users"
-        android:title="@string/settings_ignored_users"
-        app:fragment="im.vector.app.features.settings.ignored.VectorSettingsIgnoredUsersFragment"
-        app:isPreferenceVisible="@bool/settings_root_ignored_users_visible" />
-
-    <im.vector.app.core.preference.VectorPreference
         android:icon="@drawable/ic_settings_root_security_privacy"
         android:title="@string/settings_security_and_privacy"
         app:fragment="im.vector.app.features.settings.VectorSettingsSecurityPrivacyFragment"
@@ -47,7 +35,7 @@
     <im.vector.app.core.preference.VectorPreference
         android:icon="@drawable/ic_settings_root_labs"
         android:title="@string/room_settings_labs_pref_title"
-        app:fragment="im.vector.app.features.settings.VectorSettingsLabsFragment"
+        app:fragment="im.vector.app.features.settings.labs.VectorSettingsLabsFragment"
         app:isPreferenceVisible="@bool/settings_root_labs_visible" />
 
     <im.vector.app.core.preference.VectorPreference

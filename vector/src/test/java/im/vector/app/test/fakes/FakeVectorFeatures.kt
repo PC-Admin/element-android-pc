@@ -16,12 +16,46 @@
 
 package im.vector.app.test.fakes
 
+import im.vector.app.features.DefaultVectorFeatures
 import im.vector.app.features.VectorFeatures
+import io.mockk.every
+import io.mockk.spyk
 
-class FakeVectorFeatures : VectorFeatures {
-    override fun onboardingVariant() = VectorFeatures.OnboardingVariant.FTUE_AUTH
-    override fun isOnboardingAlreadyHaveAccountSplashEnabled() = true
-    override fun isOnboardingSplashCarouselEnabled() = true
-    override fun isOnboardingUseCaseEnabled() = true
-    override fun isOnboardingPersonalizeEnabled() = true
+class FakeVectorFeatures : VectorFeatures by spyk<DefaultVectorFeatures>() {
+
+    fun givenPersonalisationEnabled() {
+        every { isOnboardingPersonalizeEnabled() } returns true
+    }
+
+    fun givenCombinedRegisterEnabled() {
+        every { isOnboardingCombinedRegisterEnabled() } returns true
+    }
+
+    fun givenCombinedLoginEnabled() {
+        every { isOnboardingCombinedLoginEnabled() } returns true
+    }
+
+    fun givenOnboardingUseCaseEnabled() {
+        every { isOnboardingUseCaseEnabled() } returns true
+    }
+
+    fun givenCombinedLoginDisabled() {
+        every { isOnboardingCombinedLoginEnabled() } returns false
+    }
+
+    fun givenLocationSharing(isEnabled: Boolean) {
+        every { isLocationSharingEnabled() } returns isEnabled
+    }
+
+    fun givenVoiceBroadcast(isEnabled: Boolean) {
+        every { isVoiceBroadcastEnabled() } returns isEnabled
+    }
+
+    fun givenUnverifiedSessionsAlertEnabled(isEnabled: Boolean) {
+        every { isUnverifiedSessionsAlertEnabled() } returns isEnabled
+    }
+
+    fun givenExternalDistributorsAreAllowed(allowed: Boolean) {
+        every { allowExternalUnifiedPushDistributors() } returns allowed
+    }
 }

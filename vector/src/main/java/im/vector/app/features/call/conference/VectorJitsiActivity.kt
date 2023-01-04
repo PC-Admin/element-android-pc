@@ -25,8 +25,11 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.core.app.PictureInPictureModeChangedInfo
+import androidx.core.util.Consumer
 import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.airbnb.mvrx.Fail
 import com.airbnb.mvrx.Mavericks
 import com.airbnb.mvrx.Success
@@ -35,14 +38,16 @@ import com.facebook.react.modules.core.PermissionListener
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import im.vector.app.R
-import im.vector.app.core.extensions.exhaustive
 import im.vector.app.core.platform.VectorBaseActivity
 import im.vector.app.databinding.ActivityJitsiBinding
+import im.vector.lib.core.utils.compat.getParcelableExtraCompat
 import kotlinx.parcelize.Parcelize
+import org.jitsi.meet.sdk.BroadcastIntentHelper
 import org.jitsi.meet.sdk.JitsiMeet
 import org.jitsi.meet.sdk.JitsiMeetActivityDelegate
 import org.jitsi.meet.sdk.JitsiMeetActivityInterface
 import org.jitsi.meet.sdk.JitsiMeetConferenceOptions
+import org.jitsi.meet.sdk.JitsiMeetOngoingConferenceService
 import org.jitsi.meet.sdk.JitsiMeetView
 import org.matrix.android.sdk.api.extensions.tryOrNull
 import org.matrix.android.sdk.api.util.JsonDict
@@ -65,8 +70,16 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
 
     private val jitsiViewModel: JitsiCallViewModel by viewModel()
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val intent = Intent("onConfigurationChanged")
+        intent.putExtra("newConfig", newConfig)
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        addOnPictureInPictureModeChangedListener(pictureInPictureModeChangedInfoConsumer)
 
         jitsiViewModel.onEach {
             renderState(it)
@@ -74,12 +87,12 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
 
         jitsiViewModel.observeViewEvents {
             when (it) {
-                is JitsiCallViewEvents.JoinConference             -> configureJitsiView(it)
+                is JitsiCallViewEvents.JoinConference -> configureJitsiView(it)
                 is JitsiCallViewEvents.ConfirmSwitchingConference -> handleConfirmSwitching(it)
-                JitsiCallViewEvents.FailJoiningConference         -> handleFailJoining()
-                JitsiCallViewEvents.Finish                        -> finish()
-                JitsiCallViewEvents.LeaveConference               -> handleLeaveConference()
-            }.exhaustive
+                JitsiCallViewEvents.FailJoiningConference -> handleFailJoining()
+                JitsiCallViewEvents.Finish -> finish()
+                JitsiCallViewEvents.LeaveConference -> handleLeaveConference()
+            }
         }
         lifecycle.addObserver(ConferenceEventObserver(this, this::onBroadcastEvent))
     }
@@ -103,14 +116,24 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
 
     override fun onDestroy() {
         val currentConf = JitsiMeet.getCurrentConference()
-        jitsiMeetView?.leave()
+        handleLeaveConference()
         jitsiMeetView?.dispose()
         // Fake emitting CONFERENCE_TERMINATED event when currentConf is not null (probably when closing the PiP screen).
         if (currentConf != null) {
             ConferenceEventEmitter(this).emitConferenceEnded()
         }
+        JitsiMeetOngoingConferenceService.abort(this)
         JitsiMeetActivityDelegate.onHostDestroy(this)
+        removeOnPictureInPictureModeChangedListener(pictureInPictureModeChangedInfoConsumer)
         super.onDestroy()
+    }
+
+    // Activity lifecycle methods
+    //
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        JitsiMeetActivityDelegate.onActivityResult(this, requestCode, resultCode, data)
     }
 
     override fun onBackPressed() {
@@ -125,7 +148,8 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
     }
 
     private fun handleLeaveConference() {
-        jitsiMeetView?.leave()
+        val leaveBroadcastIntent = BroadcastIntentHelper.buildHangUpIntent()
+        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(leaveBroadcastIntent)
     }
 
     private fun handleConfirmSwitching(action: JitsiCallViewEvents.ConfirmSwitchingConference) {
@@ -139,11 +163,9 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
                 .show()
     }
 
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean,
-                                               newConfig: Configuration) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    private val pictureInPictureModeChangedInfoConsumer = Consumer<PictureInPictureModeChangedInfo> {
         checkIfActivityShouldBeFinished()
-        Timber.w("onPictureInPictureModeChanged($isInPictureInPictureMode)")
+        Timber.w("onPictureInPictureModeChanged(${it.isInPictureInPictureMode})")
     }
 
     private fun checkIfActivityShouldBeFinished() {
@@ -156,12 +178,12 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
 
     private fun renderState(viewState: JitsiCallViewState) {
         when (viewState.widget) {
-            is Fail    -> finish()
+            is Fail -> finish()
             is Success -> {
                 views.jitsiProgressLayout.isVisible = false
                 jitsiMeetView?.isVisible = true
             }
-            else       -> {
+            else -> {
                 jitsiMeetView?.isVisible = false
                 views.jitsiProgressLayout.isVisible = true
             }
@@ -200,7 +222,7 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
 
         // Is it a switch to another conf?
         intent?.takeIf { it.hasExtra(Mavericks.KEY_ARG) }
-                ?.let { intent.getParcelableExtra<Args>(Mavericks.KEY_ARG) }
+                ?.let { intent.getParcelableExtraCompat<Args>(Mavericks.KEY_ARG) }
                 ?.let {
                     jitsiViewModel.handle(JitsiCallViewActions.SwitchTo(it, true))
                 }
@@ -221,8 +243,15 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
         Timber.v("Broadcast received: $event")
         when (event) {
             is ConferenceEvent.Terminated -> onConferenceTerminated(event.data)
-            else                          -> Unit
+            is ConferenceEvent.Joined -> onConferenceJoined(event.data)
+            is ConferenceEvent.ReadyToClose -> onReadyToClose()
+            is ConferenceEvent.WillJoin -> Unit
         }
+    }
+
+    private fun onConferenceJoined(extraData: Map<String, Any>) {
+        // Launch the service for the ongoing notification.
+        JitsiMeetOngoingConferenceService.launch(this, HashMap(extraData))
     }
 
     private fun onConferenceTerminated(data: JsonDict) {
@@ -231,6 +260,11 @@ class VectorJitsiActivity : VectorBaseActivity<ActivityJitsiBinding>(), JitsiMee
         if (data["error"] == null) {
             jitsiViewModel.handle(JitsiCallViewActions.OnConferenceLeft)
         }
+    }
+
+    private fun onReadyToClose() {
+        Timber.v("SDK is ready to close")
+        finish()
     }
 
     companion object {

@@ -16,20 +16,15 @@
 
 package im.vector.app.features.location.domain.usecase
 
-import com.airbnb.mvrx.test.MvRxTestRule
 import im.vector.app.features.location.LocationData
 import im.vector.app.test.fakes.FakeSession
 import io.mockk.MockKAnnotations
 import io.mockk.impl.annotations.OverrideMockKs
-import kotlinx.coroutines.test.runBlockingTest
+import kotlinx.coroutines.test.runTest
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 
 class CompareLocationsUseCaseTest {
-
-    @get:Rule
-    val mvRxTestRule = MvRxTestRule()
 
     private val session = FakeSession()
 
@@ -42,7 +37,7 @@ class CompareLocationsUseCaseTest {
     }
 
     @Test
-    fun `given 2 very near locations when calling execute then these locations are considered as equal`() = runBlockingTest {
+    fun `given 2 very near locations when calling execute then these locations are considered as equal`() = runTest {
         // Given
         val location1 = LocationData(
                 latitude = 48.858269,
@@ -62,7 +57,7 @@ class CompareLocationsUseCaseTest {
     }
 
     @Test
-    fun `given 2 far away locations when calling execute then these locations are considered as not equal`() = runBlockingTest {
+    fun `given 2 far away locations when calling execute then these locations are considered as not equal`() = runTest {
         // Given
         val location1 = LocationData(
                 latitude = 48.858269,

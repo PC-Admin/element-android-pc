@@ -16,6 +16,11 @@
 
 package im.vector.app.features.home.room.threads.list.viewmodel
 
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
+import androidx.lifecycle.asFlow
+import androidx.paging.PagedList
 import com.airbnb.mvrx.FragmentViewModelContext
 import com.airbnb.mvrx.MavericksViewModelFactory
 import com.airbnb.mvrx.ViewModelContext
@@ -29,19 +34,46 @@ import im.vector.app.features.analytics.AnalyticsTracker
 import im.vector.app.features.analytics.extensions.toAnalyticsInteraction
 import im.vector.app.features.analytics.plan.Interaction
 import im.vector.app.features.home.room.threads.list.views.ThreadListFragment
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import org.matrix.android.sdk.api.session.Session
+import org.matrix.android.sdk.api.session.getRoom
+import org.matrix.android.sdk.api.session.room.threads.FetchThreadsResult
+import org.matrix.android.sdk.api.session.room.threads.ThreadFilter
+import org.matrix.android.sdk.api.session.room.threads.model.ThreadSummary
 import org.matrix.android.sdk.api.session.threads.ThreadTimelineEvent
 import org.matrix.android.sdk.flow.flow
 
-class ThreadListViewModel @AssistedInject constructor(@Assisted val initialState: ThreadListViewState,
-                                                      private val analyticsTracker: AnalyticsTracker,
-                                                      private val session: Session) :
-        VectorViewModel<ThreadListViewState, EmptyAction, EmptyViewEvents>(initialState) {
+class ThreadListViewModel @AssistedInject constructor(
+        @Assisted val initialState: ThreadListViewState,
+        private val analyticsTracker: AnalyticsTracker,
+        private val session: Session,
+) : VectorViewModel<ThreadListViewState, EmptyAction, EmptyViewEvents>(initialState) {
 
     private val room = session.getRoom(initialState.roomId)
+
+    private val defaultPagedListConfig = PagedList.Config.Builder()
+            .setPageSize(20)
+            .setInitialLoadSizeHint(40)
+            .setEnablePlaceholders(false)
+            .setPrefetchDistance(10)
+            .build()
+
+    private var nextBatchId: String? = null
+    private var hasReachedEnd: Boolean = false
+    private var boundariesJob: Job? = null
+
+    private var livePagedList: LiveData<PagedList<ThreadSummary>>? = null
+    private val _threadsLivePagedList = MutableLiveData<PagedList<ThreadSummary>>()
+    val threadsLivePagedList: LiveData<PagedList<ThreadSummary>> = _threadsLivePagedList
+    private val internalPagedListObserver = Observer<PagedList<ThreadSummary>> {
+        _threadsLivePagedList.postValue(it)
+        setLoading(false)
+    }
 
     @AssistedFactory
     interface Factory {
@@ -51,7 +83,7 @@ class ThreadListViewModel @AssistedInject constructor(@Assisted val initialState
     companion object : MavericksViewModelFactory<ThreadListViewModel, ThreadListViewState> {
 
         @JvmStatic
-        override fun create(viewModelContext: ViewModelContext, state: ThreadListViewState): ThreadListViewModel? {
+        override fun create(viewModelContext: ViewModelContext, state: ThreadListViewState): ThreadListViewModel {
             val fragment: ThreadListFragment = (viewModelContext as FragmentViewModelContext).fragment()
             return fragment.threadListViewModelFactory.create(state)
         }
@@ -64,13 +96,12 @@ class ThreadListViewModel @AssistedInject constructor(@Assisted val initialState
     override fun handle(action: EmptyAction) {}
 
     /**
-     * Observing thread list with respect to homeserver
-     * capabilities
+     * Observing thread list with respect to homeserver capabilities.
      */
     private fun fetchAndObserveThreads() {
-        when (session.getHomeServerCapabilities().canUseThreading) {
-            true  -> {
-                fetchThreadList()
+        when (session.homeServerCapabilitiesService().getHomeServerCapabilities().canUseThreading) {
+            true -> {
+                setLoading(true)
                 observeThreadSummaries()
             }
             false -> observeThreadsList()
@@ -78,30 +109,47 @@ class ThreadListViewModel @AssistedInject constructor(@Assisted val initialState
     }
 
     /**
-     * Observing thread summaries when homeserver support
-     * threading
+     * Observing thread summaries when homeserver support threading.
      */
-    private fun observeThreadSummaries() {
-        room?.flow()
-                ?.liveThreadSummaries()
-                ?.map { room.enhanceThreadWithEditions(it) }
-                ?.flowOn(room.coroutineDispatchers.io)
-                ?.execute { asyncThreads ->
-                    copy(threadSummaryList = asyncThreads)
-                }
+    private fun observeThreadSummaries() = withState { state ->
+        viewModelScope.launch {
+            nextBatchId = null
+            hasReachedEnd = false
+
+            livePagedList?.removeObserver(internalPagedListObserver)
+
+            room?.threadsService()
+                    ?.getPagedThreadsList(state.shouldFilterThreads, defaultPagedListConfig)?.let { result ->
+                        livePagedList = result.livePagedList
+
+                        livePagedList?.observeForever(internalPagedListObserver)
+
+                        boundariesJob = result.liveBoundaries.asFlow()
+                                .onEach {
+                                    if (it.endLoaded) {
+                                        if (!hasReachedEnd) {
+                                            fetchNextPage()
+                                        }
+                                    }
+                                }
+                                .launchIn(viewModelScope)
+                    }
+
+            setLoading(true)
+            fetchNextPage()
+        }
     }
 
     /**
-     * Observing thread list when homeserver do not support
-     * threading
+     * Observing thread list when homeserver do not support threading.
      */
     private fun observeThreadsList() {
         room?.flow()
                 ?.liveThreadList()
-                ?.map { room.mapEventsWithEdition(it) }
+                ?.map { room.threadsLocalService().mapEventsWithEdition(it) }
                 ?.map {
                     it.map { threadRootEvent ->
-                        val isParticipating = room.isUserParticipatingInThread(threadRootEvent.eventId)
+                        val isParticipating = room.threadsLocalService().isUserParticipatingInThread(threadRootEvent.eventId)
                         ThreadTimelineEvent(threadRootEvent, isParticipating)
                     }
                 }
@@ -111,18 +159,43 @@ class ThreadListViewModel @AssistedInject constructor(@Assisted val initialState
                 }
     }
 
-    private fun fetchThreadList() {
-        viewModelScope.launch {
-            room?.fetchThreadSummaries()
+    private fun setLoading(isLoading: Boolean) {
+        setState {
+            copy(isLoading = isLoading)
         }
     }
 
-    fun canHomeserverUseThreading() = session.getHomeServerCapabilities().canUseThreading
+    fun canHomeserverUseThreading() = session.homeServerCapabilitiesService().getHomeServerCapabilities().canUseThreading
 
     fun applyFiltering(shouldFilterThreads: Boolean) {
         analyticsTracker.capture(Interaction.Name.MobileThreadListFilterItem.toAnalyticsInteraction())
         setState {
             copy(shouldFilterThreads = shouldFilterThreads)
+        }
+
+        fetchAndObserveThreads()
+    }
+
+    private suspend fun fetchNextPage() {
+        val filter = when (awaitState().shouldFilterThreads) {
+            true -> ThreadFilter.PARTICIPATED
+            false -> ThreadFilter.ALL
+        }
+        room?.threadsService()?.fetchThreadList(
+                nextBatchId = nextBatchId,
+                limit = defaultPagedListConfig.pageSize,
+                filter = filter,
+        ).let { result ->
+            when (result) {
+                is FetchThreadsResult.ReachedEnd -> {
+                    hasReachedEnd = true
+                }
+                is FetchThreadsResult.ShouldFetchMore -> {
+                    nextBatchId = result.nextBatch
+                }
+                else -> {
+                }
+            }
         }
     }
 }

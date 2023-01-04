@@ -17,13 +17,16 @@
 package org.matrix.android.sdk.internal.session.homeserver
 
 import com.zhuinden.monarchy.Monarchy
-import org.matrix.android.sdk.api.MatrixPatterns.getDomain
+import org.matrix.android.sdk.api.MatrixPatterns.getServerName
 import org.matrix.android.sdk.api.auth.data.HomeServerConnectionConfig
 import org.matrix.android.sdk.api.auth.wellknown.WellknownResult
-import org.matrix.android.sdk.api.extensions.orFalse
 import org.matrix.android.sdk.api.extensions.orTrue
 import org.matrix.android.sdk.api.session.homeserver.HomeServerCapabilities
 import org.matrix.android.sdk.internal.auth.version.Versions
+import org.matrix.android.sdk.internal.auth.version.doesServerSupportLogoutDevices
+import org.matrix.android.sdk.internal.auth.version.doesServerSupportQrCodeLogin
+import org.matrix.android.sdk.internal.auth.version.doesServerSupportRemoteToggleOfPushNotifications
+import org.matrix.android.sdk.internal.auth.version.doesServerSupportThreadUnreadNotifications
 import org.matrix.android.sdk.internal.auth.version.doesServerSupportThreads
 import org.matrix.android.sdk.internal.auth.version.isLoginAndRegistrationSupportedBySdk
 import org.matrix.android.sdk.internal.database.model.HomeServerCapabilitiesEntity
@@ -93,20 +96,28 @@ internal class DefaultGetHomeServerCapabilitiesTask @Inject constructor(
             }
         }.getOrNull()
 
+        // Domain may include a port (eg, matrix.org:8080)
+        // Per https://spec.matrix.org/latest/client-server-api/#well-known-uri we should extract the hostname from the server name
+        // So we take everything before the last : as the domain for the well-known task.
+        // NB: This is not always the same endpoint as capabilities / mediaConfig uses.
         val wellknownResult = runCatching {
-            getWellknownTask.execute(GetWellknownTask.Params(
-                    domain = userId.getDomain(),
-                    homeServerConnectionConfig = homeServerConnectionConfig
-            ))
+            getWellknownTask.execute(
+                    GetWellknownTask.Params(
+                            domain = userId.getServerName().substringBeforeLast(":"),
+                            homeServerConnectionConfig = homeServerConnectionConfig
+                    )
+            )
         }.getOrNull()
 
         insertInDb(capabilities, mediaConfig, versions, wellknownResult)
     }
 
-    private suspend fun insertInDb(getCapabilitiesResult: GetCapabilitiesResult?,
-                                   getMediaConfigResult: GetMediaConfigResult?,
-                                   getVersionResult: Versions?,
-                                   getWellknownResult: WellknownResult?) {
+    private suspend fun insertInDb(
+            getCapabilitiesResult: GetCapabilitiesResult?,
+            getMediaConfigResult: GetMediaConfigResult?,
+            getVersionResult: Versions?,
+            getWellknownResult: WellknownResult?
+    ) {
         monarchy.awaitTransaction { realm ->
             val homeServerCapabilitiesEntity = HomeServerCapabilitiesEntity.getOrCreate(realm)
 
@@ -123,8 +134,6 @@ internal class DefaultGetHomeServerCapabilitiesTask @Inject constructor(
                 homeServerCapabilitiesEntity.roomVersionsJson = capabilities?.roomVersions?.let {
                     MoshiProvider.providesMoshi().adapter(RoomVersions::class.java).toJson(it)
                 }
-                homeServerCapabilitiesEntity.canUseThreading = /* capabilities?.threads?.enabled.orFalse() || */
-                        getVersionResult?.doesServerSupportThreads().orFalse()
             }
 
             if (getMediaConfigResult != null) {
@@ -133,7 +142,18 @@ internal class DefaultGetHomeServerCapabilitiesTask @Inject constructor(
             }
 
             if (getVersionResult != null) {
-                homeServerCapabilitiesEntity.lastVersionIdentityServerSupported = getVersionResult.isLoginAndRegistrationSupportedBySdk()
+                homeServerCapabilitiesEntity.lastVersionIdentityServerSupported =
+                        getVersionResult.isLoginAndRegistrationSupportedBySdk()
+                homeServerCapabilitiesEntity.canControlLogoutDevices =
+                        getVersionResult.doesServerSupportLogoutDevices()
+                homeServerCapabilitiesEntity.canUseThreading = /* capabilities?.threads?.enabled.orFalse() || */
+                        getVersionResult.doesServerSupportThreads()
+                homeServerCapabilitiesEntity.canUseThreadReadReceiptsAndNotifications =
+                        getVersionResult.doesServerSupportThreadUnreadNotifications()
+                homeServerCapabilitiesEntity.canLoginWithQrCode =
+                        getVersionResult.doesServerSupportQrCodeLogin()
+                homeServerCapabilitiesEntity.canRemotelyTogglePushNotificationsOfDevices =
+                        getVersionResult.doesServerSupportRemoteToggleOfPushNotifications()
             }
 
             if (getWellknownResult != null && getWellknownResult is WellknownResult.Prompt) {

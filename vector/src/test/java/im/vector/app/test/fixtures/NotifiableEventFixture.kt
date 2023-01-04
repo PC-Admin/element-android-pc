@@ -63,6 +63,7 @@ fun anInviteNotifiableEvent(
 fun aNotifiableMessageEvent(
         eventId: String = "a-message-event-id",
         roomId: String = "a-message-room-id",
+        threadId: String? = null,
         isRedacted: Boolean = false
 ) = NotifiableMessageEvent(
         eventId = eventId,
@@ -73,9 +74,10 @@ fun aNotifiableMessageEvent(
         senderId = "sending-id",
         body = "message-body",
         roomId = roomId,
+        threadId = threadId,
         roomName = "room-name",
         roomIsDirect = false,
         canBeReplaced = false,
         isRedacted = isRedacted,
-        imageUri = null
+        imageUriString = null
 )

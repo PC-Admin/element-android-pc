@@ -27,8 +27,11 @@ data class NotifiableMessageEvent(
         val senderName: String?,
         val senderId: String?,
         val body: String?,
-        val imageUri: Uri?,
+        // We cannot use Uri? type here, as that could trigger a
+        // NotSerializableException when persisting this to storage
+        val imageUriString: String?,
         val roomId: String,
+        val threadId: String?,
         val roomName: String?,
         val roomIsDirect: Boolean = false,
         val roomAvatarPath: String? = null,
@@ -38,10 +41,21 @@ data class NotifiableMessageEvent(
         // This is used for >N notification, as the result of a smart reply
         val outGoingMessage: Boolean = false,
         val outGoingMessageFailed: Boolean = false,
-        override val isRedacted: Boolean = false
+        override val isRedacted: Boolean = false,
+        override val isUpdated: Boolean = false
 ) : NotifiableEvent {
 
     val type: String = EventType.MESSAGE
     val description: String = body ?: ""
     val title: String = senderName ?: ""
+
+    val imageUri: Uri?
+        get() = imageUriString?.let { Uri.parse(it) }
+}
+
+fun NotifiableMessageEvent.shouldIgnoreMessageEventInRoom(currentRoomId: String?, currentThreadId: String?): Boolean {
+    return when (currentRoomId) {
+        null -> false
+        else -> roomId == currentRoomId && threadId == currentThreadId
+    }
 }

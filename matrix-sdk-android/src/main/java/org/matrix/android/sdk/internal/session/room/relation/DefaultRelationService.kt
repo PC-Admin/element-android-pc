@@ -92,26 +92,34 @@ internal class DefaultRelationService @AssistedInject constructor(
         }
     }
 
-    override fun editPoll(targetEvent: TimelineEvent,
-                          pollType: PollType,
-                          question: String,
-                          options: List<String>): Cancelable {
+    override fun editPoll(
+            targetEvent: TimelineEvent,
+            pollType: PollType,
+            question: String,
+            options: List<String>
+    ): Cancelable {
         return eventEditor.editPoll(targetEvent, pollType, question, options)
     }
 
-    override fun editTextMessage(targetEvent: TimelineEvent,
-                                 msgType: String,
-                                 newBodyText: CharSequence,
-                                 newBodyAutoMarkdown: Boolean,
-                                 compatibilityBodyText: String): Cancelable {
-        return eventEditor.editTextMessage(targetEvent, msgType, newBodyText, newBodyAutoMarkdown, compatibilityBodyText)
+    override fun editTextMessage(
+            targetEvent: TimelineEvent,
+            msgType: String,
+            newBodyText: CharSequence,
+            newFormattedBodyText: CharSequence?,
+            newBodyAutoMarkdown: Boolean,
+            compatibilityBodyText: String
+    ): Cancelable {
+        return eventEditor.editTextMessage(targetEvent, msgType, newBodyText, newFormattedBodyText, newBodyAutoMarkdown, compatibilityBodyText)
     }
 
-    override fun editReply(replyToEdit: TimelineEvent,
-                           originalTimelineEvent: TimelineEvent,
-                           newBodyText: String,
-                           compatibilityBodyText: String): Cancelable {
-        return eventEditor.editReply(replyToEdit, originalTimelineEvent, newBodyText, compatibilityBodyText)
+    override fun editReply(
+            replyToEdit: TimelineEvent,
+            originalTimelineEvent: TimelineEvent,
+            newBodyText: String,
+            newFormattedBodyText: String?,
+            compatibilityBodyText: String
+    ): Cancelable {
+        return eventEditor.editReply(replyToEdit, originalTimelineEvent, newBodyText, newFormattedBodyText, compatibilityBodyText)
     }
 
     override suspend fun fetchEditHistory(eventId: String): List<Event> {
@@ -121,6 +129,7 @@ internal class DefaultRelationService @AssistedInject constructor(
     override fun replyToMessage(
             eventReplied: TimelineEvent,
             replyText: CharSequence,
+            replyFormattedText: CharSequence?,
             autoMarkdown: Boolean,
             showInThread: Boolean,
             rootThreadEventId: String?
@@ -129,9 +138,11 @@ internal class DefaultRelationService @AssistedInject constructor(
                 roomId = roomId,
                 eventReplied = eventReplied,
                 replyText = replyText,
+                replyTextFormatted = replyFormattedText,
                 autoMarkdown = autoMarkdown,
                 rootThreadEventId = rootThreadEventId,
-                showInThread = showInThread)
+                showInThread = showInThread
+        )
                 ?.also { saveLocalEcho(it) }
                 ?: return null
 
@@ -163,13 +174,15 @@ internal class DefaultRelationService @AssistedInject constructor(
             msgType: String,
             autoMarkdown: Boolean,
             formattedText: String?,
-            eventReplied: TimelineEvent?): Cancelable? {
+            eventReplied: TimelineEvent?
+    ): Cancelable? {
         val event = if (eventReplied != null) {
             // Reply within a thread
             eventFactory.createReplyTextEvent(
                     roomId = roomId,
                     eventReplied = eventReplied,
                     replyText = replyInThreadText,
+                    replyTextFormatted = formattedText,
                     autoMarkdown = autoMarkdown,
                     rootThreadEventId = rootThreadEventId,
                     showInThread = false
@@ -186,7 +199,8 @@ internal class DefaultRelationService @AssistedInject constructor(
                     text = replyInThreadText,
                     msgType = msgType,
                     autoMarkdown = autoMarkdown,
-                    formattedText = formattedText)
+                    formattedText = formattedText
+            )
                     .also {
                         saveLocalEcho(it)
                     }

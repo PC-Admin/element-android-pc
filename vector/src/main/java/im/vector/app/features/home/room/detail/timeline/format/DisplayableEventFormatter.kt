@@ -19,9 +19,16 @@ package im.vector.app.features.home.room.detail.timeline.format
 import dagger.Lazy
 import im.vector.app.EmojiSpanify
 import im.vector.app.R
+import im.vector.app.core.extensions.getVectorLastMessageContent
+import im.vector.app.core.extensions.orEmpty
 import im.vector.app.core.resources.ColorProvider
+import im.vector.app.core.resources.DrawableProvider
 import im.vector.app.core.resources.StringProvider
 import im.vector.app.features.html.EventHtmlRenderer
+import im.vector.app.features.voicebroadcast.VoiceBroadcastConstants
+import im.vector.app.features.voicebroadcast.isLive
+import im.vector.app.features.voicebroadcast.model.asVoiceBroadcastEvent
+import me.gujun.android.span.image
 import me.gujun.android.span.span
 import org.commonmark.node.Document
 import org.matrix.android.sdk.api.session.events.model.Event
@@ -34,13 +41,13 @@ import org.matrix.android.sdk.api.session.room.model.message.MessageTextContent
 import org.matrix.android.sdk.api.session.room.model.message.MessageType
 import org.matrix.android.sdk.api.session.room.model.relation.ReactionContent
 import org.matrix.android.sdk.api.session.room.timeline.TimelineEvent
-import org.matrix.android.sdk.api.session.room.timeline.getLastMessageContent
 import org.matrix.android.sdk.api.session.room.timeline.getTextDisplayableContent
 import javax.inject.Inject
 
 class DisplayableEventFormatter @Inject constructor(
         private val stringProvider: StringProvider,
         private val colorProvider: ColorProvider,
+        private val drawableProvider: DrawableProvider,
         private val emojiSpanify: EmojiSpanify,
         private val noticeEventFormatter: NoticeEventFormatter,
         private val htmlRenderer: Lazy<EventHtmlRenderer>
@@ -59,10 +66,10 @@ class DisplayableEventFormatter @Inject constructor(
         val senderName = timelineEvent.senderInfo.disambiguatedDisplayName
 
         return when (timelineEvent.root.getClearType()) {
-            EventType.MESSAGE               -> {
-                timelineEvent.getLastMessageContent()?.let { messageContent ->
+            EventType.MESSAGE -> {
+                timelineEvent.getVectorLastMessageContent()?.let { messageContent ->
                     when (messageContent.msgType) {
-                        MessageType.MSGTYPE_TEXT                 -> {
+                        MessageType.MSGTYPE_TEXT -> {
                             val body = messageContent.getTextDisplayableContent()
                             if (messageContent is MessageTextContent && messageContent.matrixFormattedBody.isNullOrBlank().not()) {
                                 val localFormattedBody = htmlRenderer.get().parse(body) as Document
@@ -75,35 +82,35 @@ class DisplayableEventFormatter @Inject constructor(
                         MessageType.MSGTYPE_VERIFICATION_REQUEST -> {
                             simpleFormat(senderName, stringProvider.getString(R.string.verification_request), appendAuthor)
                         }
-                        MessageType.MSGTYPE_IMAGE                -> {
+                        MessageType.MSGTYPE_IMAGE -> {
                             simpleFormat(senderName, stringProvider.getString(R.string.sent_an_image), appendAuthor)
                         }
-                        MessageType.MSGTYPE_AUDIO                -> {
+                        MessageType.MSGTYPE_AUDIO -> {
                             if ((messageContent as? MessageAudioContent)?.voiceMessageIndicator != null) {
                                 simpleFormat(senderName, stringProvider.getString(R.string.sent_a_voice_message), appendAuthor)
                             } else {
                                 simpleFormat(senderName, stringProvider.getString(R.string.sent_an_audio_file), appendAuthor)
                             }
                         }
-                        MessageType.MSGTYPE_VIDEO                -> {
+                        MessageType.MSGTYPE_VIDEO -> {
                             simpleFormat(senderName, stringProvider.getString(R.string.sent_a_video), appendAuthor)
                         }
-                        MessageType.MSGTYPE_FILE                 -> {
+                        MessageType.MSGTYPE_FILE -> {
                             simpleFormat(senderName, stringProvider.getString(R.string.sent_a_file), appendAuthor)
                         }
-                        MessageType.MSGTYPE_LOCATION             -> {
+                        MessageType.MSGTYPE_LOCATION -> {
                             simpleFormat(senderName, stringProvider.getString(R.string.sent_location), appendAuthor)
                         }
-                        else                                     -> {
+                        else -> {
                             simpleFormat(senderName, messageContent.body, appendAuthor)
                         }
                     }
                 } ?: span { }
             }
-            EventType.STICKER               -> {
+            EventType.STICKER -> {
                 simpleFormat(senderName, stringProvider.getString(R.string.send_a_sticker), appendAuthor)
             }
-            EventType.REACTION              -> {
+            EventType.REACTION -> {
                 timelineEvent.root.getClearContent().toModel<ReactionContent>()?.relatesTo?.let {
                     val emojiSpanned = emojiSpanify.spanify(stringProvider.getString(R.string.sent_a_reaction, it.key))
                     simpleFormat(senderName, emojiSpanned, appendAuthor)
@@ -119,20 +126,26 @@ class DisplayableEventFormatter @Inject constructor(
             EventType.KEY_VERIFICATION_MAC,
             EventType.KEY_VERIFICATION_KEY,
             EventType.KEY_VERIFICATION_READY,
-            EventType.CALL_CANDIDATES       -> {
+            EventType.CALL_CANDIDATES -> {
                 span { }
             }
-            in EventType.POLL_START         -> {
+            in EventType.POLL_START.values -> {
                 timelineEvent.root.getClearContent().toModel<MessagePollContent>(catchError = true)?.getBestPollCreationInfo()?.question?.getBestQuestion()
                         ?: stringProvider.getString(R.string.sent_a_poll)
             }
-            in EventType.POLL_RESPONSE      -> {
+            in EventType.POLL_RESPONSE.values -> {
                 stringProvider.getString(R.string.poll_response_room_list_preview)
             }
-            in EventType.POLL_END           -> {
+            in EventType.POLL_END.values -> {
                 stringProvider.getString(R.string.poll_end_room_list_preview)
             }
-            else                            -> {
+            in EventType.STATE_ROOM_BEACON_INFO.values -> {
+                simpleFormat(senderName, stringProvider.getString(R.string.sent_live_location), appendAuthor)
+            }
+            VoiceBroadcastConstants.STATE_ROOM_VOICE_BROADCAST_INFO -> {
+                formatVoiceBroadcastEvent(timelineEvent.root, isDm, senderName)
+            }
+            else -> {
                 span {
                     text = noticeEventFormatter.format(timelineEvent, isDm) ?: ""
                     textStyle = "italic"
@@ -143,7 +156,8 @@ class DisplayableEventFormatter @Inject constructor(
 
     fun formatThreadSummary(
             event: Event?,
-            latestEdition: String? = null): CharSequence {
+            latestEdition: String? = null
+    ): CharSequence {
         event ?: return ""
 
         // There event have been edited
@@ -167,10 +181,10 @@ class DisplayableEventFormatter @Inject constructor(
         }
 
         return when (event.getClearType()) {
-            EventType.MESSAGE       -> {
+            EventType.MESSAGE -> {
                 (event.getClearContent().toModel() as? MessageContent)?.let { messageContent ->
                     when (messageContent.msgType) {
-                        MessageType.MSGTYPE_TEXT                 -> {
+                        MessageType.MSGTYPE_TEXT -> {
                             val body = messageContent.getTextDisplayableContent()
                             if (messageContent is MessageTextContent && messageContent.matrixFormattedBody.isNullOrBlank().not()) {
                                 val localFormattedBody = htmlRenderer.get().parse(body) as Document
@@ -183,50 +197,53 @@ class DisplayableEventFormatter @Inject constructor(
                         MessageType.MSGTYPE_VERIFICATION_REQUEST -> {
                             stringProvider.getString(R.string.verification_request)
                         }
-                        MessageType.MSGTYPE_IMAGE                -> {
+                        MessageType.MSGTYPE_IMAGE -> {
                             stringProvider.getString(R.string.sent_an_image)
                         }
-                        MessageType.MSGTYPE_AUDIO                -> {
+                        MessageType.MSGTYPE_AUDIO -> {
                             if ((messageContent as? MessageAudioContent)?.voiceMessageIndicator != null) {
                                 stringProvider.getString(R.string.sent_a_voice_message)
                             } else {
                                 stringProvider.getString(R.string.sent_an_audio_file)
                             }
                         }
-                        MessageType.MSGTYPE_VIDEO                -> {
+                        MessageType.MSGTYPE_VIDEO -> {
                             stringProvider.getString(R.string.sent_a_video)
                         }
-                        MessageType.MSGTYPE_FILE                 -> {
+                        MessageType.MSGTYPE_FILE -> {
                             stringProvider.getString(R.string.sent_a_file)
                         }
-                        MessageType.MSGTYPE_LOCATION             -> {
+                        MessageType.MSGTYPE_LOCATION -> {
                             stringProvider.getString(R.string.sent_location)
                         }
-                        else                                     -> {
+                        else -> {
                             messageContent.body
                         }
                     }
                 } ?: span { }
             }
-            EventType.STICKER       -> {
+            EventType.STICKER -> {
                 stringProvider.getString(R.string.send_a_sticker)
             }
-            EventType.REACTION      -> {
+            EventType.REACTION -> {
                 event.getClearContent().toModel<ReactionContent>()?.relatesTo?.let {
                     emojiSpanify.spanify(stringProvider.getString(R.string.sent_a_reaction, it.key))
                 } ?: span { }
             }
-            in EventType.POLL_START    -> {
+            in EventType.POLL_START.values -> {
                 event.getClearContent().toModel<MessagePollContent>(catchError = true)?.pollCreationInfo?.question?.question
                         ?: stringProvider.getString(R.string.sent_a_poll)
             }
-            in EventType.POLL_RESPONSE -> {
+            in EventType.POLL_RESPONSE.values -> {
                 stringProvider.getString(R.string.poll_response_room_list_preview)
             }
-            in EventType.POLL_END      -> {
+            in EventType.POLL_END.values -> {
                 stringProvider.getString(R.string.poll_end_room_list_preview)
             }
-            else                    -> {
+            in EventType.STATE_ROOM_BEACON_INFO.values -> {
+                stringProvider.getString(R.string.sent_live_location)
+            }
+            else -> {
                 span {
                 }
             }
@@ -243,6 +260,22 @@ class DisplayableEventFormatter @Inject constructor(
                     .append(body)
         } else {
             body
+        }
+    }
+
+    private fun formatVoiceBroadcastEvent(event: Event, isDm: Boolean, senderName: String): CharSequence {
+        return if (event.asVoiceBroadcastEvent()?.isLive == true) {
+            span {
+                drawableProvider.getDrawable(R.drawable.ic_voice_broadcast, colorProvider.getColor(R.color.palette_vermilion))?.let {
+                    image(it)
+                    +" "
+                }
+                span(stringProvider.getString(R.string.voice_broadcast_live_broadcast)) {
+                    textColor = colorProvider.getColor(R.color.palette_vermilion)
+                }
+            }
+        } else {
+            noticeEventFormatter.format(event, senderName, isDm).orEmpty()
         }
     }
 }
